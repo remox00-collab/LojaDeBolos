@@ -48,6 +48,12 @@ label{font-size:.8rem;color:var(--muted);}
 .order-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8rem;margin-bottom:.8rem;}
 .badge{display:inline-block;padding:.15rem .6rem;border-radius:20px;font-size:.75rem;background:#e8c98a;color:#5a3d00;}
 .badge.done{background:#bfe3c0;color:#1e5c22;}
+.badge.prep{background:#cfe3f5;color:#1b4b73;}
+.badge.transit{background:#e3d2f5;color:#4b1b73;}
+.steps{display:flex;align-items:center;gap:.25rem;margin:.5rem 0;flex-wrap:wrap;}
+.step{font-size:.7rem;padding:.25rem .55rem;border-radius:12px;background:var(--border);color:var(--muted);}
+.step.done{background:var(--accent);color:#fff;}
+.step-sep{flex:0 0 14px;height:2px;background:var(--border);}
 @media (max-width: 480px){
   header h1{font-size:1.3rem;}
   main{padding:.6rem;}
@@ -118,6 +124,10 @@ label{font-size:.8rem;color:var(--muted);}
 
   <div id="loginPrompt" class="notice hidden">Faça login ou crie uma conta acima para ver o cardápio.</div>
   <div id="menuSection">
+    <div id="myOrdersSection">
+      <div class="section-title">Meus pedidos</div>
+      <div id="myOrdersList"></div>
+    </div>
     <div class="section-title">Nosso cardápio</div>
     <div id="grid" class="grid"></div>
   </div>
@@ -177,6 +187,16 @@ db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
 let currentPhotoDataUrl = null;
+
+const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
+const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
+const STATUS_TEXT = { aguardando_pagamento:'Aguardando pagamento', preparo:'Em preparo', saiu_entrega:'Saiu para entrega', entregue:'Entregue' };
+const STATUS_FLOW = {
+  aguardando_pagamento: { next:'preparo', label:'Confirmar pagamento recebido' },
+  preparo: { next:'saiu_entrega', label:'Saiu para entrega' },
+  saiu_entrega: { next:'entregue', label:'Marcar como entregue' },
+  entregue: { next:null, label:null }
+};
 
 async function updatePhotoPreview(){
   const fileInput = document.getElementById('pPhotoFile');
@@ -262,6 +282,7 @@ auth.onAuthStateChanged((user)=>{
     document.getElementById('loginPrompt').classList.add('hidden');
     checkAdmin(user.uid, user.email);
     loadProducts();
+    loadMyOrders();
   } else {
     document.getElementById('authLoggedOut').classList.remove('hidden');
     document.getElementById('authLoggedIn').classList.add('hidden');
@@ -407,11 +428,43 @@ async function confirmOrder(){
   try{
     await db.collection('orders').add({
       userId: currentUser.uid, customerName, rua, numero, bairro, cidade,
-      paymentMethod, items: cart, total, status: 'pendente',
+      paymentMethod, items: cart, total, status: 'aguardando_pagamento',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    showToast('Pedido registrado!'); cart=[]; updateCartFab(); closeCheckout();
+    showToast('Pedido registrado! Assim que confirmarmos o pagamento, ele entra em preparo.'); cart=[]; updateCartFab(); closeCheckout();
+    loadMyOrders();
   }catch(e){ showToast('Erro ao registrar pedido: '+e.message, true); }
+}
+
+async function loadMyOrders(){
+  if (!currentUser) return;
+  try{
+    const snap = await withTimeout(db.collection('orders').where('userId','==',currentUser.uid).get());
+    const orders = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    orders.sort((a,b)=> (b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0));
+    renderMyOrders(orders);
+  }catch(e){ console.error(e); document.getElementById('myOrdersList').innerHTML = '<p class="small">Não consegui carregar seus pedidos.</p>'; }
+}
+
+function renderMyOrders(orders){
+  const list = document.getElementById('myOrdersList');
+  if (!orders.length){ list.innerHTML = '<p class="small">Você ainda não fez nenhum pedido.</p>'; return; }
+  list.innerHTML = orders.map(o=>{
+    const status = o.status || 'aguardando_pagamento';
+    const idx = STEPS.indexOf(status);
+    const stepsHtml = STEPS.map((s,i)=> `<span class="step ${i<=idx?'done':''}">${STEP_LABELS[s]}</span>${i<STEPS.length-1?'<span class="step-sep"></span>':''}`).join('');
+    let eta = '';
+    if (status === 'saiu_entrega' && o.deliveryStartedAt && o.deliveryStartedAt.toDate){
+      const start = o.deliveryStartedAt.toDate();
+      const fmt = d=> d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+      eta = `<div class="small">Previsão de chegada: entre ${fmt(new Date(start.getTime()+30*60000))} e ${fmt(new Date(start.getTime()+50*60000))}</div>`;
+    }
+    return `<div class="order-card">
+      <div class="steps">${stepsHtml}</div>
+      ${eta}
+      <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
+    </div>`;
+  }).join('');
 }
 
 async function loadOrders(){
@@ -428,10 +481,13 @@ function renderOrders(orders){
     const items = (o.items||[]).map(it=>`<li>${escapeHtml(it.name)} — R$ ${Number(it.price).toFixed(2).replace('.',',')}</li>`).join('');
     const payLabel = {pix:'Pix',credito:'Cartão de crédito',debito:'Cartão de débito'}[o.paymentMethod]||o.paymentMethod;
     const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
+    const status = o.status || 'aguardando_pagamento';
+    const flow = STATUS_FLOW[status];
+    const badgeClass = status==='entregue' ? 'done' : (status==='saiu_entrega' ? 'transit' : (status==='preparo' ? 'prep' : ''));
     return `<div class="order-card">
       <div class="row" style="justify-content:space-between">
         <strong>${escapeHtml(o.customerName||'')}</strong>
-        <span class="badge ${o.status==='concluido'?'done':''}">${o.status==='concluido'?'Concluído':'Pendente'}</span>
+        <span class="badge ${badgeClass}">${STATUS_TEXT[status]}</span>
       </div>
       <div class="small">${when}</div>
       <div class="small">${escapeHtml(addrLine)}</div>
@@ -439,14 +495,17 @@ function renderOrders(orders){
       <ul>${items}</ul>
       <strong>Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</strong>
       <div class="row" style="margin-top:.5rem">
-        <button class="secondary" onclick="toggleOrderStatus('${o.id}','${o.status}')">${o.status==='concluido'?'Reabrir pedido':'Marcar como concluído'}</button>
+        ${flow.next ? `<button class="secondary" onclick="advanceOrderStatus('${o.id}','${status}')">${flow.label}</button>` : '<span class="small">Pedido concluído.</span>'}
       </div>
     </div>`;
   }).join('');
 }
-async function toggleOrderStatus(id, status){
-  const next = status==='concluido' ? 'pendente' : 'concluido';
-  try{ await db.collection('orders').doc(id).update({ status: next }); loadOrders(); }
+async function advanceOrderStatus(id, status){
+  const flow = STATUS_FLOW[status];
+  if (!flow || !flow.next) return;
+  const update = { status: flow.next };
+  if (flow.next === 'saiu_entrega') update.deliveryStartedAt = firebase.firestore.FieldValue.serverTimestamp();
+  try{ await db.collection('orders').doc(id).update(update); loadOrders(); }
   catch(e){ showToast('Erro ao atualizar pedido.', true); }
 }
 </script>
