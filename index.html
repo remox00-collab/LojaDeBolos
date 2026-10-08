@@ -105,7 +105,7 @@ img{max-width:100%;}
     <button id="bellBtn" class="icon-btn hidden" onclick="toggleNotifs()" title="Notificações">🔔<span id="bellBadge" class="badge-dot hidden">0</span></button>
     <button id="cartBtn" class="icon-btn hidden" onclick="openCheckout()" title="Carrinho">🛒<span id="cartCount" class="badge-dot hidden">0</span></button>
   </div>
-  <h1>🍰 Doces & Cia</h1>
+  <h1 onclick="goHome()" style="cursor:pointer" title="Ir para o início">🍰 Doces & Cia</h1>
   <p>Bolos e salgados feitos com carinho</p>
 </header>
 <div id="userMenu" class="notif-panel user-menu hidden">
@@ -581,6 +581,11 @@ function showView(v){
   window.scrollTo(0,0);
 }
 
+function goHome(){
+  document.getElementById('userMenu').classList.add('hidden');
+  document.getElementById('notifPanel').classList.add('hidden');
+  if (currentUser) showView('menu'); else window.scrollTo(0,0);
+}
 function toggleUserMenu(){ document.getElementById('userMenu').classList.toggle('hidden'); }
 function goProfile(){ document.getElementById('userMenu').classList.add('hidden'); showView('account'); showAccountTab('perfil'); }
 function menuLogout(){ document.getElementById('userMenu').classList.add('hidden'); doLogout(); }
