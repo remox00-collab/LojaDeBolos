@@ -43,8 +43,8 @@ label{font-size:.8rem;color:var(--muted);}
 .toast{position:fixed;top:1rem;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:.6rem 1rem;border-radius:8px;font-size:.85rem;z-index:50;max-width:90vw;box-shadow:0 4px 10px rgba(0,0,0,.3);}
 .toast.error{background:#a94442;}
 .cart-fab{position:fixed;bottom:1rem;right:1rem;background:var(--accent);color:#fff;border-radius:50px;padding:.8rem 1.1rem;box-shadow:0 4px 12px rgba(0,0,0,.25);}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20;}
-.sheet{background:var(--card);width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:1.2rem;max-height:85vh;overflow-y:auto;}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:20;padding:1rem;}
+.sheet{background:var(--card);width:100%;max-width:480px;border-radius:16px;padding:1.2rem;max-height:85vh;overflow-y:auto;}
 .cart-line{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.9rem;}
 .order-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8rem;margin-bottom:.8rem;}
 .badge{display:inline-block;padding:.15rem .6rem;border-radius:20px;font-size:.75rem;background:#e8c98a;color:#5a3d00;}
@@ -68,6 +68,7 @@ img{max-width:100%;}
 .subtabs{display:flex;gap:.5rem;overflow-x:auto;padding:.2rem 0 .8rem;margin-top:1rem;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
 .subtabs::-webkit-scrollbar{display:none;}
 .subtab{flex:0 0 auto;white-space:nowrap;background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:20px;}
+.pend{background:#a94442;color:#fff;border-radius:10px;padding:0 .4rem;font-size:.7rem;margin-left:.3rem;}
 .subtab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .top-actions{position:absolute;right:.6rem;top:50%;transform:translateY(-50%);display:flex;gap:.4rem;}
 .icon-btn{position:relative;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:50%;width:2.5rem;height:2.5rem;padding:0;font-size:1.1rem;}
@@ -183,6 +184,7 @@ img{max-width:100%;}
   <div id="viewAccount" class="hidden">
     <div class="subtabs">
       <button class="subtab active" data-s="perfil" onclick="showAccountTab('perfil')">Perfil</button>
+      <button class="subtab" data-s="pendentes" onclick="showAccountTab('pendentes')">Pendentes <span id="pendCount" class="pend hidden">0</span></button>
       <button class="subtab" data-s="pedidos" onclick="showAccountTab('pedidos')">Meus pedidos</button>
     </div>
     <div id="acc-perfil" class="subpane">
@@ -200,6 +202,9 @@ img{max-width:100%;}
         </div>
       </div>
     </div>
+    </div>
+    <div id="acc-pendentes" class="subpane hidden">
+      <div id="pendingList"></div>
     </div>
     <div id="acc-pedidos" class="subpane hidden">
       <div id="myOrdersList"></div>
@@ -265,7 +270,7 @@ const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null;
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null, unsubMy = null;
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
@@ -354,6 +359,7 @@ async function loginWithFacebook(){
 auth.onAuthStateChanged((user)=>{
   currentUser = user; isAdmin = false; profile = {}; pendingPhoto = null;
   stopOrderWatch(); notifOrders = [];
+  if (unsubMy){ unsubMy(); unsubMy = null; }
   document.getElementById('bellBtn').classList.add('hidden');
   document.getElementById('notifPanel').classList.add('hidden');
   document.getElementById('authBox').classList.toggle('hidden', !!user);
@@ -372,6 +378,8 @@ auth.onAuthStateChanged((user)=>{
     currentView = 'menu'; cart = []; productsCache = []; myOrdersCache = [];
     document.getElementById('grid').innerHTML = '';
     document.getElementById('myOrdersList').innerHTML = '';
+    document.getElementById('pendingList').innerHTML = '';
+    document.getElementById('pendCount').classList.add('hidden');
     document.getElementById('lastOrderBox').classList.add('hidden');
     showAccountTab('perfil'); updateCartFab();
   }
@@ -501,9 +509,13 @@ function buildPix(key, name, city, amount, txid){
     emv('62', emv('05', tx)) + '6304';
   return base + crc16(base);
 }
-function closePay(){ document.getElementById('payOverlay').classList.add('hidden'); }
-function copyPix(){
-  const ta = document.getElementById('pixCode');
+function closePay(){
+  const wasPix = !!document.getElementById('pixCode');
+  document.getElementById('payOverlay').classList.add('hidden');
+  if (wasPix) showToast('Se precisar, o QR Code fica em Conta > Pendentes.');
+}
+function copyPix(id){
+  const ta = document.getElementById(id || 'pixCode');
   const done = ()=> showToast('Código Pix copiado!');
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, ()=>{ ta.select(); document.execCommand('copy'); done(); });
   else { ta.select(); document.execCommand('copy'); done(); }
@@ -751,15 +763,44 @@ function reorder(orderId){
 }
 
 async function loadMyOrders(){
-  if (!currentUser) return;
-  try{
-    const snap = await withTimeout(db.collection('orders').where('userId','==',currentUser.uid).get());
-    const orders = snap.docs.map(d=>({ id:d.id, ...d.data() }));
-    orders.sort((a,b)=> (b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0));
+  if (!currentUser || unsubMy) return;
+  unsubMy = db.collection('orders').where('userId','==',currentUser.uid).onSnapshot(snap=>{
+    const t = o=> o.createdAt && o.createdAt.toMillis ? o.createdAt.toMillis() : Date.now();
+    const orders = snap.docs.map(d=>({ id:d.id, ...d.data() })).sort((a,b)=> t(b)-t(a));
     myOrdersCache = orders;
     renderMyOrders(orders);
     renderLastOrder();
-  }catch(e){ console.error(e); document.getElementById('myOrdersList').innerHTML = '<p class="small">Não consegui carregar seus pedidos.</p>'; }
+    renderPending();
+  }, err=>{ console.error(err); document.getElementById('myOrdersList').innerHTML = '<p class="small">Não consegui carregar seus pedidos.</p>'; });
+}
+
+async function renderPending(){
+  const box = document.getElementById('pendingList');
+  const pend = myOrdersCache.filter(o=> (o.status||'aguardando_pagamento')==='aguardando_pagamento' && o.paymentMethod==='pix');
+  const badge = document.getElementById('pendCount');
+  badge.textContent = pend.length; badge.classList.toggle('hidden', !pend.length);
+  if (!pend.length){ box.innerHTML = '<p class="small">Você não tem pagamentos pendentes.</p>'; return; }
+  const p = await loadPaySettings();
+  if (!p || !p.pixKey){ box.innerHTML = '<p class="small">A loja ainda não cadastrou a chave Pix. Entre em contato com a loja para combinar o pagamento.</p>'; return; }
+  box.innerHTML = pend.map(o=>{
+    const code = buildPix(p.pixKey, p.beneficiary || 'LOJA', p.city || 'BRASIL', o.total, o.id);
+    const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
+    const items = (o.items||[]).map(i=>escapeHtml(i.name)).join(', ');
+    return `<div class="order-card">
+      <strong>Pague com Pix — R$ ${fmtBRL(o.total)}</strong>
+      <div class="small">${when} · ${items}</div>
+      <div id="qr-${o.id}" style="display:flex;justify-content:center;margin:.8rem 0"></div>
+      <label>Pix copia e cola</label>
+      <textarea id="pix-${o.id}" rows="3" readonly>${escapeHtml(code)}</textarea>
+      <button onclick="copyPix('pix-${o.id}')">Copiar código</button>
+      <div class="small" style="margin-top:.4rem">Beneficiário: <strong>${escapeHtml(p.beneficiary||'')}</strong>. Assim que a loja confirmar o recebimento, o pedido entra em preparo.</div>
+    </div>`;
+  }).join('');
+  pend.forEach(o=>{
+    const el = document.getElementById('qr-'+o.id);
+    const code = document.getElementById('pix-'+o.id).value;
+    if (el && typeof QRCode !== 'undefined') new QRCode(el, { text: code, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+  });
 }
 
 function renderMyOrders(orders){
@@ -783,7 +824,6 @@ function renderMyOrders(orders){
       <div class="steps">${stepsHtml}</div>
       ${eta}
       <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
-      ${status==='aguardando_pagamento' && o.paymentMethod==='pix' ? `<button style="margin-top:.5rem;margin-right:.4rem" onclick="showPayment('${o.id}',${Number(o.total)},'pix')">Pagar com Pix</button>` : ''}
       <button class="secondary" style="margin-top:.5rem" onclick="reorder('${o.id}')">Pedir de novo</button>
     </div>`;
   }).join('');
