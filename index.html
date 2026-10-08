@@ -75,6 +75,8 @@ img{max-width:100%;}
 .icon-btn{position:relative;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:50%;width:2.5rem;height:2.5rem;padding:0;font-size:1.1rem;}
 .badge-dot{position:absolute;top:-.3rem;right:-.3rem;background:#a94442;color:#fff;border-radius:10px;font-size:.65rem;min-width:1.1rem;padding:.05rem .3rem;line-height:1.1rem;}
 .notif-panel{position:fixed;top:4.2rem;right:.6rem;width:min(94vw,380px);max-height:70vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.8rem;z-index:25;box-shadow:0 8px 24px rgba(0,0,0,.2);}
+.user-btn{position:absolute;left:.6rem;top:50%;transform:translateY(-50%);background-size:cover;background-position:center;font-weight:bold;color:var(--accent);}
+.user-menu{right:auto;left:.6rem;width:min(80vw,260px);}
 .notif-item{padding:.5rem .6rem;border-bottom:1px solid var(--border);border-radius:8px;}
 .notif-item.new{background:#fff3e0;}
 @media (max-width: 480px){
@@ -98,6 +100,7 @@ img{max-width:100%;}
 <body>
 <div id="toast" class="toast hidden"></div>
 <header>
+  <button id="userBtn" class="icon-btn user-btn hidden" onclick="toggleUserMenu()" title="Minha conta"></button>
   <div class="top-actions">
     <button id="bellBtn" class="icon-btn hidden" onclick="toggleNotifs()" title="Notificações">🔔<span id="bellBadge" class="badge-dot hidden">0</span></button>
     <button id="cartBtn" class="icon-btn hidden" onclick="openCheckout()" title="Carrinho">🛒<span id="cartCount" class="badge-dot hidden">0</span></button>
@@ -105,6 +108,14 @@ img{max-width:100%;}
   <h1>🍰 Doces & Cia</h1>
   <p>Bolos e salgados feitos com carinho</p>
 </header>
+<div id="userMenu" class="notif-panel user-menu hidden">
+  <div style="padding:.2rem .4rem .6rem;border-bottom:1px solid var(--border);margin-bottom:.5rem">
+    <strong id="userMenuName"></strong>
+    <div class="small" id="userMenuEmail"></div>
+  </div>
+  <button class="secondary" style="width:100%;margin-bottom:.4rem" onclick="goProfile()">👤 Acessar perfil</button>
+  <button class="secondary" style="width:100%" onclick="menuLogout()">🚪 Sair da conta</button>
+</div>
 <div id="notifPanel" class="notif-panel hidden">
   <div class="row" style="justify-content:space-between;align-items:center"><strong>Notificações</strong><button class="secondary" onclick="enableAlerts()">Ativar som e avisos</button></div>
   <div id="notifList"></div>
@@ -369,6 +380,8 @@ auth.onAuthStateChanged((user)=>{
   document.getElementById('bellBtn').classList.add('hidden');
   document.getElementById('notifPanel').classList.add('hidden');
   document.getElementById('authHelp').classList.add('hidden');
+  document.getElementById('userMenu').classList.add('hidden');
+  document.getElementById('userBtn').classList.toggle('hidden', !user);
   document.getElementById('authBox').classList.toggle('hidden', !!user);
   document.getElementById('tabbar').classList.toggle('hidden', !user);
   document.getElementById('loginPrompt').classList.toggle('hidden', !!user);
@@ -568,6 +581,13 @@ function showView(v){
   window.scrollTo(0,0);
 }
 
+function toggleUserMenu(){ document.getElementById('userMenu').classList.toggle('hidden'); }
+function goProfile(){ document.getElementById('userMenu').classList.add('hidden'); showView('account'); showAccountTab('perfil'); }
+function menuLogout(){ document.getElementById('userMenu').classList.add('hidden'); doLogout(); }
+document.addEventListener('click', e=>{
+  const m = document.getElementById('userMenu');
+  if (!m.classList.contains('hidden') && !e.target.closest('#userMenu') && !e.target.closest('#userBtn')) m.classList.add('hidden');
+});
 function showAccountTab(name){
   document.querySelectorAll('.subpane').forEach(el=> el.classList.toggle('hidden', el.id !== 'acc-'+name));
   document.querySelectorAll('.subtab').forEach(b=> b.classList.toggle('active', b.dataset.s === name));
@@ -579,6 +599,11 @@ function renderProfile(){
   else { av.style.backgroundImage = 'none'; av.textContent = ((profile.displayName || (currentUser&&currentUser.email) || '?')[0]).toUpperCase(); }
   document.getElementById('profName').value = profile.displayName || '';
   document.getElementById('profEmail').textContent = currentUser ? (currentUser.email || '') : '';
+  const ub = document.getElementById('userBtn');
+  if (profile.photoURL){ ub.style.backgroundImage = `url("${profile.photoURL}")`; ub.textContent = ''; }
+  else { ub.style.backgroundImage = 'none'; ub.textContent = ((profile.displayName || (currentUser&&currentUser.email) || '?')[0]).toUpperCase(); }
+  document.getElementById('userMenuName').textContent = profile.displayName || 'Minha conta';
+  document.getElementById('userMenuEmail').textContent = currentUser ? (currentUser.email || '') : '';
 }
 async function pickProfilePhoto(){
   const f = document.getElementById('profPhoto').files[0];
