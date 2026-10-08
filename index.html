@@ -120,6 +120,8 @@ img{max-width:100%;}
         <button onclick="doLogin()">Entrar</button>
         <button class="secondary" onclick="doSignup()">Criar conta</button>
       </div>
+      <div style="margin-top:.4rem"><a href="#" class="small" onclick="resetPassword();return false;">Esqueci minha senha</a></div>
+      <div id="authHelp" class="notice hidden" style="margin-top:.5rem"></div>
       <div class="row" style="margin-top:.3rem">
         <button class="secondary" onclick="loginWithGoogle()">Entrar com Google</button>
         <button class="secondary" onclick="loginWithFacebook()">Entrar com Facebook</button>
@@ -266,6 +268,7 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
+auth.languageCode = 'pt-BR';
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
@@ -344,6 +347,7 @@ function mapAuthError(e){
     'auth/too-many-requests': 'Muitas tentativas. Tente novamente em alguns minutos.',
     'auth/popup-closed-by-user': 'Janela de login fechada antes de concluir.',
     'auth/account-exists-with-different-credential': 'Esse e-mail já está cadastrado com outra forma de login.',
+    'auth/missing-email': 'Digite seu e-mail.',
     'auth/network-request-failed': 'Falha de conexão. Verifique sua internet.'
   };
   return map[e.code] || ('Não foi possível entrar: ' + e.message);
@@ -364,6 +368,7 @@ auth.onAuthStateChanged((user)=>{
   if (unsubMy){ unsubMy(); unsubMy = null; }
   document.getElementById('bellBtn').classList.add('hidden');
   document.getElementById('notifPanel').classList.add('hidden');
+  document.getElementById('authHelp').classList.add('hidden');
   document.getElementById('authBox').classList.toggle('hidden', !!user);
   document.getElementById('tabbar').classList.toggle('hidden', !user);
   document.getElementById('loginPrompt').classList.toggle('hidden', !!user);
@@ -619,7 +624,23 @@ async function doLogin(){
   const email = document.getElementById('authEmail').value.trim();
   const password = document.getElementById('authPass').value;
   try{ await auth.signInWithEmailAndPassword(email, password); showToast('Login feito!'); }
-  catch(e){ showToast(mapAuthError(e), true); }
+  catch(e){
+    showToast(mapAuthError(e), true);
+    if (['auth/wrong-password','auth/invalid-credential'].includes(e.code)) showAuthHelp('Esqueceu a senha? Receba um link por e-mail para criar uma nova.', true);
+  }
+}
+function showAuthHelp(msg, withReset){
+  const el = document.getElementById('authHelp');
+  el.innerHTML = escapeHtml(msg) + (withReset ? '<br><button class="secondary" style="margin-top:.4rem" onclick="resetPassword()">Enviar link para redefinir a senha</button>' : '');
+  el.classList.remove('hidden');
+}
+async function resetPassword(){
+  const email = document.getElementById('authEmail').value.trim();
+  if (!email) return showAuthHelp('Digite seu e-mail no campo acima e clique em "Esqueci minha senha".', false);
+  try{
+    await auth.sendPasswordResetEmail(email);
+    showAuthHelp('Se existir uma conta com ' + email + ', enviamos um link para redefinir a senha. Confira a caixa de entrada (Gmail, Outlook etc.) e também a pasta de spam.', false);
+  }catch(e){ showToast(mapAuthError(e), true); }
 }
 async function doSignup(){
   const email = document.getElementById('authEmail').value.trim();
@@ -629,7 +650,10 @@ async function doSignup(){
     const cred = await auth.createUserWithEmailAndPassword(email, password);
     await db.collection('users').doc(cred.user.uid).set({ email, isAdmin:false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
     showToast('Conta criada!');
-  } catch(e){ showToast(mapAuthError(e), true); }
+  } catch(e){
+    if (e.code === 'auth/email-already-in-use') showAuthHelp('Já existe uma conta vinculada a este e-mail. Se você não lembra a senha, redefina por e-mail para voltar a entrar.', true);
+    else showToast(mapAuthError(e), true);
+  }
 }
 async function doLogout(){ await auth.signOut(); cart=[]; updateCartFab(); }
 
