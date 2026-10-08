@@ -54,7 +54,21 @@ label{font-size:.8rem;color:var(--muted);}
 .step{font-size:.7rem;padding:.25rem .55rem;border-radius:12px;background:var(--border);color:var(--muted);}
 .step.done{background:var(--accent);color:#fff;}
 .step-sep{flex:0 0 14px;height:2px;background:var(--border);}
+body{padding-bottom:calc(4.4rem + env(safe-area-inset-bottom,0px));}
+img{max-width:100%;}
+.tabbar{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom,0px);z-index:15;}
+.tab{flex:1;background:transparent;color:var(--muted);border-radius:0;display:flex;flex-direction:column;align-items:center;gap:.1rem;padding:.55rem .3rem;font-size:1.2rem;}
+.tab span{font-size:.7rem;}
+.tab.active{color:var(--accent);font-weight:bold;}
+.cart-fab{bottom:calc(4.8rem + env(safe-area-inset-bottom,0px));}
+.profile{display:flex;gap:1rem;align-items:flex-start;}
+.profile-fields{flex:1;min-width:0;}
+.avatar{width:96px;height:96px;border-radius:50%;background:var(--border) center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:2.2rem;color:var(--accent);flex:0 0 auto;}
 @media (max-width: 480px){
+  input,textarea,select{font-size:16px;}
+  .profile{flex-direction:column;align-items:center;}
+  .profile-fields{width:100%;}
+  header{padding:.8rem .6rem;}
   header h1{font-size:1.3rem;}
   main{padding:.6rem;}
   .grid{grid-template-columns:repeat(2,1fr);gap:.6rem;}
@@ -89,15 +103,12 @@ label{font-size:.8rem;color:var(--muted);}
         <button class="secondary" onclick="loginWithFacebook()">Entrar com Facebook</button>
       </div>
     </div>
-    <div id="authLoggedIn" class="hidden">
-      <span id="authWho" class="small"></span>
-      <button class="secondary" onclick="doLogout()">Sair</button>
-    </div>
   </div>
 
-  <div id="ownerBanner" class="notice hidden">Modo administrador ativo.</div>
+  <div id="viewAdmin" class="hidden">
+  <div id="ownerBanner" class="notice">Modo administrador ativo.</div>
 
-  <div id="adminBox" class="box hidden">
+  <div id="adminBox" class="box">
     <strong>Adicionar produto</strong>
     <div class="row">
       <div><label>Nome</label><input id="pName" placeholder="Ex: Bolo de chocolate"></div>
@@ -124,19 +135,42 @@ label{font-size:.8rem;color:var(--muted);}
 
   <div id="loginPrompt" class="notice hidden">Faça login ou crie uma conta acima para ver o cardápio.</div>
   <div id="menuSection">
-    <div id="myOrdersSection">
-      <div class="section-title">Meus pedidos</div>
-      <div id="myOrdersList"></div>
-    </div>
     <div class="section-title">Nosso cardápio</div>
     <div id="grid" class="grid"></div>
   </div>
 
-  <div id="ordersSection" class="hidden">
+  <div id="ordersSection">
     <div class="section-title">Pedidos recebidos</div>
     <div id="ordersList"></div>
   </div>
+  </div>
+
+  <div id="viewAccount" class="hidden">
+    <div class="section-title">Minha conta</div>
+    <div class="box profile">
+      <div id="avatar" class="avatar"></div>
+      <div class="profile-fields">
+        <label>Foto de perfil</label>
+        <input id="profPhoto" type="file" accept="image/*" onchange="pickProfilePhoto()">
+        <label>Seu nome</label>
+        <input id="profName" placeholder="Como quer ser chamado">
+        <div class="small">Conectado como <strong id="profEmail"></strong></div>
+        <div class="row" style="margin-top:.6rem">
+          <button onclick="saveProfile()">Salvar perfil</button>
+          <button class="secondary" onclick="doLogout()">Sair</button>
+        </div>
+      </div>
+    </div>
+    <div class="section-title">Meus pedidos</div>
+    <div id="myOrdersList"></div>
+  </div>
 </main>
+
+<nav id="tabbar" class="tabbar hidden">
+  <button class="tab active" data-v="menu" onclick="showView('menu')">🍰<span>Cardápio</span></button>
+  <button class="tab" data-v="account" onclick="showView('account')">👤<span>Conta</span></button>
+  <button id="tabAdmin" class="tab hidden" data-v="admin" onclick="showView('admin')">⚙️<span>Admin</span></button>
+</nav>
 
 <div id="cartFab" class="cart-fab hidden" onclick="openCheckout()">🛒 Ver carrinho (<span id="cartCount">0</span>)</div>
 
@@ -186,7 +220,7 @@ const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null;
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null;
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
@@ -273,27 +307,61 @@ async function loginWithFacebook(){
 }
 
 auth.onAuthStateChanged((user)=>{
-  currentUser = user; isAdmin = false;
+  currentUser = user; isAdmin = false; profile = {}; pendingPhoto = null;
+  document.getElementById('authBox').classList.toggle('hidden', !!user);
+  document.getElementById('tabbar').classList.toggle('hidden', !user);
+  document.getElementById('loginPrompt').classList.toggle('hidden', !!user);
+  document.getElementById('tabAdmin').classList.add('hidden');
   if (user){
-    document.getElementById('authLoggedOut').classList.add('hidden');
-    document.getElementById('authLoggedIn').classList.remove('hidden');
-    document.getElementById('authWho').textContent = user.email;
-    document.getElementById('menuSection').classList.remove('hidden');
-    document.getElementById('loginPrompt').classList.add('hidden');
+    profile = { displayName: user.displayName || '', photoURL: user.photoURL || '' };
+    renderProfile();
+    showView('menu');
     checkAdmin(user.uid, user.email);
     loadProducts();
     loadMyOrders();
   } else {
-    document.getElementById('authLoggedOut').classList.remove('hidden');
-    document.getElementById('authLoggedIn').classList.add('hidden');
-    document.getElementById('ownerBanner').classList.add('hidden');
-    document.getElementById('adminBox').classList.add('hidden');
-    document.getElementById('ordersSection').classList.add('hidden');
-    document.getElementById('menuSection').classList.add('hidden');
-    document.getElementById('loginPrompt').classList.remove('hidden');
+    ['menuSection','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
     cart = []; updateCartFab();
   }
 });
+
+function showView(v){
+  currentView = v;
+  document.getElementById('menuSection').classList.toggle('hidden', v!=='menu');
+  document.getElementById('viewAccount').classList.toggle('hidden', v!=='account');
+  document.getElementById('viewAdmin').classList.toggle('hidden', v!=='admin');
+  document.querySelectorAll('.tab').forEach(b=> b.classList.toggle('active', b.dataset.v===v));
+  updateCartFab();
+  window.scrollTo(0,0);
+}
+
+function renderProfile(){
+  const av = document.getElementById('avatar');
+  const photo = pendingPhoto || profile.photoURL;
+  if (photo){ av.style.backgroundImage = `url("${photo}")`; av.textContent = ''; }
+  else { av.style.backgroundImage = 'none'; av.textContent = ((profile.displayName || (currentUser&&currentUser.email) || '?')[0]).toUpperCase(); }
+  document.getElementById('profName').value = profile.displayName || '';
+  document.getElementById('profEmail').textContent = currentUser ? (currentUser.email || '') : '';
+}
+async function pickProfilePhoto(){
+  const f = document.getElementById('profPhoto').files[0];
+  if (!f) return;
+  try{ pendingPhoto = await readAndCompressImage(f, 256, 0.8); renderProfile(); document.getElementById('profName').value = profile.displayName || ''; }
+  catch(e){ showToast('Erro ao processar a foto: '+e.message, true); }
+}
+async function saveProfile(){
+  if (!currentUser) return;
+  const name = document.getElementById('profName').value.trim();
+  const data = { displayName: name };
+  if (pendingPhoto) data.photoData = pendingPhoto;
+  try{
+    await withTimeout(db.collection('users').doc(currentUser.uid).set(data, { merge: true }));
+    profile.displayName = name;
+    if (pendingPhoto) profile.photoURL = pendingPhoto;
+    pendingPhoto = null; document.getElementById('profPhoto').value = '';
+    renderProfile(); showToast('Perfil salvo!');
+  }catch(e){ showToast('Erro ao salvar perfil: '+e.message, true); }
+}
 
 async function checkAdmin(uid, email){
   try{
@@ -303,12 +371,14 @@ async function checkAdmin(uid, email){
       await withTimeout(ref.set({ email: email||null, isAdmin:false, createdAt: firebase.firestore.FieldValue.serverTimestamp() }));
       isAdmin = false;
     } else {
-      isAdmin = !!snap.data().isAdmin;
+      const d = snap.data(); isAdmin = !!d.isAdmin;
+      if (d.displayName) profile.displayName = d.displayName;
+      if (d.photoData) profile.photoURL = d.photoData;
+      renderProfile();
     }
   }catch(e){ console.error('Erro ao checar perfil:', e); showToast('Não consegui checar seu perfil (tempo esgotado).', true); }
-  document.getElementById('ownerBanner').classList.toggle('hidden', !isAdmin);
-  document.getElementById('adminBox').classList.toggle('hidden', !isAdmin);
-  document.getElementById('ordersSection').classList.toggle('hidden', !isAdmin);
+  document.getElementById('tabAdmin').classList.toggle('hidden', !isAdmin);
+  if (productsCache.length) renderGrid(productsCache);
   if (isAdmin) loadOrders();
 }
 
@@ -328,7 +398,7 @@ async function doSignup(){
     showToast('Conta criada!');
   } catch(e){ showToast(mapAuthError(e), true); }
 }
-async function doLogout(){ await auth.signOut(); cart=[]; updateCartFab(); }
+async function doLogout(){ await auth.signOut(); cart=[]; updateCartFab(); showView('menu'); }
 
 async function loadProducts(){
   try{
@@ -401,7 +471,7 @@ function addToCart(id){
 function removeFromCart(i){ cart.splice(i,1); updateCartFab(); renderCartItems(); }
 function updateCartFab(){
   document.getElementById('cartCount').textContent = cart.length;
-  document.getElementById('cartFab').classList.toggle('hidden', cart.length===0);
+  document.getElementById('cartFab').classList.toggle('hidden', cart.length===0 || currentView!=='menu');
 }
 function renderCartItems(){
   const list = document.getElementById('cartItems'); let total=0;
@@ -411,7 +481,7 @@ function renderCartItems(){
   }).join('') : '<p class="small">Carrinho vazio.</p>';
   document.getElementById('cartTotal').textContent = total.toFixed(2).replace('.',',');
 }
-function openCheckout(){ renderCartItems(); document.getElementById('checkoutOverlay').classList.remove('hidden'); }
+function openCheckout(){ renderCartItems(); const n=document.getElementById('custName'); if(!n.value) n.value = profile.displayName || ''; document.getElementById('checkoutOverlay').classList.remove('hidden'); }
 function closeCheckout(){ document.getElementById('checkoutOverlay').classList.add('hidden'); }
 
 async function confirmOrder(){
@@ -452,6 +522,8 @@ function renderMyOrders(orders){
   list.innerHTML = orders.map(o=>{
     const status = o.status || 'aguardando_pagamento';
     const idx = STEPS.indexOf(status);
+    const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
+    const itemsTxt = (o.items||[]).map(i=>escapeHtml(i.name)).join(', ');
     const stepsHtml = STEPS.map((s,i)=> `<span class="step ${i<=idx?'done':''}">${STEP_LABELS[s]}</span>${i<STEPS.length-1?'<span class="step-sep"></span>':''}`).join('');
     let eta = '';
     if (status === 'saiu_entrega' && o.deliveryStartedAt && o.deliveryStartedAt.toDate){
@@ -460,6 +532,8 @@ function renderMyOrders(orders){
       eta = `<div class="small">Previsão de chegada: entre ${fmt(new Date(start.getTime()+30*60000))} e ${fmt(new Date(start.getTime()+50*60000))}</div>`;
     }
     return `<div class="order-card">
+      <div class="small">${when}</div>
+      <div>${itemsTxt}</div>
       <div class="steps">${stepsHtml}</div>
       ${eta}
       <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
