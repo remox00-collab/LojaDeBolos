@@ -75,6 +75,9 @@ img{max-width:100%;}
 .icon-btn{position:relative;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:50%;width:2.5rem;height:2.5rem;padding:0;font-size:1.1rem;}
 .badge-dot{position:absolute;top:-.3rem;right:-.3rem;background:#a94442;color:#fff;border-radius:10px;font-size:.65rem;min-width:1.1rem;padding:.05rem .3rem;line-height:1.1rem;}
 .notif-panel{position:fixed;top:4.2rem;right:.6rem;width:min(94vw,380px);max-height:70vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.8rem;z-index:25;box-shadow:0 8px 24px rgba(0,0,0,.2);}
+.pw-wrap{position:relative;margin-bottom:.5rem;}
+.pw-wrap input{margin-bottom:0;padding-right:2.8rem;}
+.eye{position:absolute;right:.2rem;top:50%;transform:translateY(-50%);background:transparent;color:var(--muted);padding:.3rem .5rem;font-size:1.1rem;}
 .user-btn{position:absolute;left:.6rem;top:50%;transform:translateY(-50%);background-size:cover;background-position:center;font-weight:bold;color:var(--accent);}
 .user-menu{right:auto;left:.6rem;width:min(80vw,260px);}
 .notif-item{padding:.5rem .6rem;border-bottom:1px solid var(--border);border-radius:8px;}
@@ -126,7 +129,11 @@ img{max-width:100%;}
     <div id="authLoggedOut">
       <strong>Entrar</strong>
       <input id="authEmail" type="email" autocomplete="email" placeholder="seu@email.com">
-      <input id="authPass" type="password" autocomplete="current-password" placeholder="senha">
+      <div class="pw-wrap">
+        <input id="authPass" type="password" autocomplete="current-password" placeholder="senha">
+        <button type="button" id="eyeBtn" class="eye" aria-label="Mostrar senha" onmousedown="return false" onpointerenter="pwHoverSet(event,true)" onpointerleave="pwHoverSet(event,false)" onclick="pwToggle()">👁️</button>
+      </div>
+      <div id="capsWarn" class="small hidden" style="color:#a94442;margin-bottom:.4rem">⚠️ Caps Lock ligado — as letras estão saindo em maiúsculas.</div>
       <div class="row">
         <button onclick="doLogin()">Entrar</button>
         <button class="secondary" onclick="doSignup()">Criar conta</button>
@@ -285,7 +292,7 @@ const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null, unsubMy = null, payOrderId = null, expiring = new Set();
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null, unsubMy = null, payOrderId = null, expiring = new Set(), pwPinned = false, pwHover = false;
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
@@ -380,6 +387,7 @@ auth.onAuthStateChanged((user)=>{
   document.getElementById('bellBtn').classList.add('hidden');
   document.getElementById('notifPanel').classList.add('hidden');
   document.getElementById('authHelp').classList.add('hidden');
+  pwPinned = false; pwHover = false; applyPw();
   document.getElementById('userMenu').classList.add('hidden');
   document.getElementById('userBtn').classList.toggle('hidden', !user);
   document.getElementById('authBox').classList.toggle('hidden', !!user);
@@ -586,6 +594,24 @@ function goHome(){
   document.getElementById('notifPanel').classList.add('hidden');
   if (currentUser) showView('menu'); else window.scrollTo(0,0);
 }
+// ===== Senha: olho e aviso de Caps Lock =====
+function applyPw(){
+  const i = document.getElementById('authPass'), b = document.getElementById('eyeBtn');
+  const show = pwPinned || pwHover;
+  i.type = show ? 'text' : 'password';
+  b.textContent = show ? '🙈' : '👁️';
+  b.setAttribute('aria-label', show ? 'Esconder senha' : 'Mostrar senha');
+}
+function pwToggle(){ pwPinned = !pwPinned; applyPw(); }
+function pwHoverSet(e, on){ if (e.pointerType === 'mouse'){ pwHover = on; applyPw(); } }
+function checkCaps(e){
+  if (!e.target || !['authPass','authEmail'].includes(e.target.id) || !e.getModifierState) return;
+  document.getElementById('capsWarn').classList.toggle('hidden', !e.getModifierState('CapsLock'));
+}
+document.addEventListener('keydown', checkCaps);
+document.addEventListener('keyup', checkCaps);
+document.addEventListener('focusout', e=>{ if (e.target && ['authPass','authEmail'].includes(e.target.id)) document.getElementById('capsWarn').classList.add('hidden'); });
+
 function toggleUserMenu(){ document.getElementById('userMenu').classList.toggle('hidden'); }
 function goProfile(){ document.getElementById('userMenu').classList.add('hidden'); showView('account'); showAccountTab('perfil'); }
 function menuLogout(){ document.getElementById('userMenu').classList.add('hidden'); doLogout(); }
