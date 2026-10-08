@@ -48,6 +48,7 @@ label{font-size:.8rem;color:var(--muted);}
 .cart-line{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--border);font-size:.9rem;}
 .order-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:.8rem;margin-bottom:.8rem;}
 .badge{display:inline-block;padding:.15rem .6rem;border-radius:20px;font-size:.75rem;background:#e8c98a;color:#5a3d00;}
+.badge.cancel{background:#f3c9c9;color:#7a1f1f;}
 .badge.done{background:#bfe3c0;color:#1e5c22;}
 .badge.prep{background:#cfe3f5;color:#1b4b73;}
 .badge.transit{background:#e3d2f5;color:#4b1b73;}
@@ -242,7 +243,7 @@ img{max-width:100%;}
       <option value="credito">Cartão de crédito (na entrega)</option>
       <option value="debito">Cartão de débito (na entrega)</option>
     </select>
-    <p class="small">Pix: você paga na próxima tela, com QR Code. Cartão: o pagamento é feito na entrega, na maquininha. A loja confirma o pagamento e libera o preparo.</p>
+    <p class="small">Pix: você paga na próxima tela, com QR Code, e tem 10 minutos para pagar (depois o pedido é cancelado). Cartão: o pagamento é feito na entrega, na maquininha. A loja confirma o pagamento e libera o preparo.</p>
     </div>
     <div class="row">
       <button id="btnConfirm" onclick="confirmOrder()">Confirmar pedido</button>
@@ -270,16 +271,17 @@ const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null, unsubMy = null;
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null, unsubMy = null, payOrderId = null, expiring = new Set();
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
-const STATUS_TEXT = { aguardando_pagamento:'Aguardando pagamento', preparo:'Em preparo', saiu_entrega:'Saiu para entrega', entregue:'Entregue' };
+const STATUS_TEXT = { aguardando_pagamento:'Aguardando pagamento', preparo:'Em preparo', saiu_entrega:'Saiu para entrega', entregue:'Entregue', cancelado:'Cancelado (Pix expirou)' };
 const STATUS_FLOW = {
   aguardando_pagamento: { next:'preparo', label:'Confirmar pagamento recebido' },
   preparo: { next:'saiu_entrega', label:'Saiu para entrega' },
   saiu_entrega: { next:'entregue', label:'Marcar como entregue' },
-  entregue: { next:null, label:null }
+  entregue: { next:null, label:null },
+  cancelado: { next:'preparo', label:'Pagamento recebido — reativar pedido' }
 };
 
 async function updatePhotoPreview(){
@@ -522,6 +524,7 @@ function copyPix(id){
 }
 async function showPayment(orderId, total, method){
   const sheet = document.getElementById('paySheet');
+  payOrderId = orderId;
   document.getElementById('payOverlay').classList.remove('hidden');
   const closeBtn = '<div class="row" style="margin-top:.8rem"><button class="secondary" onclick="closePay()">Fechar</button></div>';
   if (method !== 'pix'){
@@ -538,7 +541,7 @@ async function showPayment(orderId, total, method){
   const code = buildPix(p.pixKey, p.beneficiary || 'LOJA', p.city || 'BRASIL', total, orderId);
   const bank = (p.bank || p.agency || p.account) ? `<p class="small">Ou transfira para: ${escapeHtml(p.bank||'')} ${p.agency?'· Ag. '+escapeHtml(p.agency):''} ${p.account?'· Conta '+escapeHtml(p.account):''}</p>` : '';
   sheet.innerHTML = `<h3>Pague com Pix</h3>
-    <p class="small">Escaneie o QR Code no app do seu banco ou use o Pix copia e cola.</p>
+    <p class="small">Escaneie o QR Code no app do seu banco ou use o Pix copia e cola. Você tem <strong>10 minutos</strong> para pagar; depois o pedido é cancelado automaticamente.</p>
     <p><strong>Valor: R$ ${fmtBRL(total)}</strong></p>
     <div id="qrBox" style="display:flex;justify-content:center;margin:.8rem 0"></div>
     <label>Pix copia e cola</label>
@@ -743,7 +746,7 @@ async function confirmOrder(){
 
 function renderLastOrder(){
   const box = document.getElementById('lastOrderBox');
-  const o = myOrdersCache[0];
+  const o = myOrdersCache.find(x=> x.status !== 'cancelado');
   if (!o || !(o.items||[]).length){ box.classList.add('hidden'); return; }
   const names = o.items.map(i=>escapeHtml(i.name)).join(', ');
   box.innerHTML = `<strong>Seu último pedido</strong><div class="small" style="margin:.3rem 0 .6rem">${names} — R$ ${Number(o.total).toFixed(2).replace('.',',')}</div><button onclick="reorder('${o.id}')">Pedir de novo</button>`;
@@ -762,6 +765,35 @@ function reorder(orderId){
   if (missing) showToast(missing+' item(ns) não estão mais no cardápio.', true);
 }
 
+// ===== Expiração do Pix (10 minutos) =====
+const PIX_TTL_MS = 10 * 60 * 1000;
+function pixExpiresAt(o){ return (o.createdAt && o.createdAt.toMillis ? o.createdAt.toMillis() : Date.now()) + PIX_TTL_MS; }
+function isPixPending(o){ return (o.status || 'aguardando_pagamento') === 'aguardando_pagamento' && o.paymentMethod === 'pix'; }
+async function expireOrder(id, silent){
+  if (expiring.has(id)) return;
+  expiring.add(id);
+  if (payOrderId === id) document.getElementById('payOverlay').classList.add('hidden');
+  try{
+    await db.collection('orders').doc(id).update({ status: 'cancelado' });
+    if (!silent) showToast('Seu pedido com Pix expirou (10 min) e foi cancelado.', true);
+  }catch(e){ console.error('Não consegui cancelar o pedido expirado:', e); }
+}
+setInterval(()=>{
+  const now = Date.now(); let expired = false;
+  document.querySelectorAll('.pend-timer').forEach(el=>{
+    const left = Number(el.dataset.exp) - now;
+    if (left <= 0){
+      expired = true; expireOrder(el.dataset.id, false);
+      const card = el.closest('.order-card'); if (card) card.remove();
+    } else {
+      const m = Math.floor(left/60000), sec = Math.floor((left%60000)/1000);
+      el.textContent = '⏳ Expira em ' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    }
+  });
+  if (expired) renderPending();
+  if (isAdmin) notifOrders.filter(o=> isPixPending(o) && pixExpiresAt(o) <= now).forEach(o=> expireOrder(o.id, true));
+}, 1000);
+
 async function loadMyOrders(){
   if (!currentUser || unsubMy) return;
   unsubMy = db.collection('orders').where('userId','==',currentUser.uid).onSnapshot(snap=>{
@@ -776,7 +808,9 @@ async function loadMyOrders(){
 
 async function renderPending(){
   const box = document.getElementById('pendingList');
-  const pend = myOrdersCache.filter(o=> (o.status||'aguardando_pagamento')==='aguardando_pagamento' && o.paymentMethod==='pix');
+  const nowMs = Date.now();
+  myOrdersCache.filter(o=> isPixPending(o) && pixExpiresAt(o) <= nowMs).forEach(o=> expireOrder(o.id, false));
+  const pend = myOrdersCache.filter(o=> isPixPending(o) && pixExpiresAt(o) > nowMs);
   const badge = document.getElementById('pendCount');
   badge.textContent = pend.length; badge.classList.toggle('hidden', !pend.length);
   if (!pend.length){ box.innerHTML = '<p class="small">Você não tem pagamentos pendentes.</p>'; return; }
@@ -789,6 +823,7 @@ async function renderPending(){
     return `<div class="order-card">
       <strong>Pague com Pix — R$ ${fmtBRL(o.total)}</strong>
       <div class="small">${when} · ${items}</div>
+      <div class="small pend-timer" data-id="${o.id}" data-exp="${pixExpiresAt(o)}" style="color:#a94442;font-weight:bold"></div>
       <div id="qr-${o.id}" style="display:flex;justify-content:center;margin:.8rem 0"></div>
       <label>Pix copia e cola</label>
       <textarea id="pix-${o.id}" rows="3" readonly>${escapeHtml(code)}</textarea>
@@ -805,7 +840,8 @@ async function renderPending(){
 
 function renderMyOrders(orders){
   const list = document.getElementById('myOrdersList');
-  if (!orders.length){ list.innerHTML = '<p class="small">Você ainda não fez nenhum pedido.</p>'; return; }
+  orders = orders.filter(o=> ['preparo','saiu_entrega','entregue'].includes(o.status));
+  if (!orders.length){ list.innerHTML = '<p class="small">Depois que o pagamento for confirmado, o andamento do seu pedido aparece aqui.</p>'; return; }
   list.innerHTML = orders.map(o=>{
     const status = o.status || 'aguardando_pagamento';
     const idx = STEPS.indexOf(status);
@@ -821,7 +857,7 @@ function renderMyOrders(orders){
     return `<div class="order-card">
       <div class="small">${when}</div>
       <div>${itemsTxt}</div>
-      <div class="steps">${stepsHtml}</div>
+      ${status==='cancelado' ? '<span class="badge cancel">Cancelado — Pix não pago em 10 minutos</span>' : `<div class="steps">${stepsHtml}</div>`}
       ${eta}
       <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
       <button class="secondary" style="margin-top:.5rem" onclick="reorder('${o.id}')">Pedir de novo</button>
@@ -845,7 +881,7 @@ function renderOrders(orders){
     const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
     const status = o.status || 'aguardando_pagamento';
     const flow = STATUS_FLOW[status];
-    const badgeClass = status==='entregue' ? 'done' : (status==='saiu_entrega' ? 'transit' : (status==='preparo' ? 'prep' : ''));
+    const badgeClass = status==='cancelado' ? 'cancel' : status==='entregue' ? 'done' : (status==='saiu_entrega' ? 'transit' : (status==='preparo' ? 'prep' : ''));
     return `<div class="order-card">
       <div class="row" style="justify-content:space-between">
         <strong>${escapeHtml(o.customerName||'')}</strong>
