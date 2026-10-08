@@ -105,6 +105,13 @@ img{max-width:100%;}
     </div>
   </div>
 
+  <div id="loginPrompt" class="notice hidden">Faça login ou crie uma conta acima para ver o cardápio.</div>
+  <div id="menuSection">
+    <div id="lastOrderBox" class="box hidden"></div>
+    <div class="section-title">Nosso cardápio</div>
+    <div id="grid" class="grid"></div>
+  </div>
+
   <div id="viewAdmin" class="hidden">
   <div id="ownerBanner" class="notice">Modo administrador ativo.</div>
 
@@ -131,12 +138,6 @@ img{max-width:100%;}
       <button onclick="saveProduct()">Salvar produto</button>
       <button class="secondary" onclick="clearForm()">Limpar</button>
     </div>
-  </div>
-
-  <div id="loginPrompt" class="notice hidden">Faça login ou crie uma conta acima para ver o cardápio.</div>
-  <div id="menuSection">
-    <div class="section-title">Nosso cardápio</div>
-    <div id="grid" class="grid"></div>
   </div>
 
   <div id="ordersSection">
@@ -220,7 +221,7 @@ const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null;
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [];
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
@@ -405,6 +406,7 @@ async function loadProducts(){
     const snap = await withTimeout(db.collection('products').orderBy('createdAt','desc').get());
     productsCache = snap.docs.map(d=>({ id: d.id, ...d.data() }));
     renderGrid(productsCache);
+    renderLastOrder();
   }catch(e){ console.error(e); document.getElementById('grid').innerHTML = '<p class="small">Não consegui carregar o cardápio (tempo esgotado). Recarregue a página.</p>'; }
 }
 
@@ -506,13 +508,36 @@ async function confirmOrder(){
   }catch(e){ showToast('Erro ao registrar pedido: '+e.message, true); }
 }
 
+function renderLastOrder(){
+  const box = document.getElementById('lastOrderBox');
+  const o = myOrdersCache[0];
+  if (!o || !(o.items||[]).length){ box.classList.add('hidden'); return; }
+  const names = o.items.map(i=>escapeHtml(i.name)).join(', ');
+  box.innerHTML = `<strong>Seu último pedido</strong><div class="small" style="margin:.3rem 0 .6rem">${names} — R$ ${Number(o.total).toFixed(2).replace('.',',')}</div><button onclick="reorder('${o.id}')">Pedir de novo</button>`;
+  box.classList.remove('hidden');
+}
+function reorder(orderId){
+  const o = myOrdersCache.find(x=>x.id===orderId);
+  if (!o) return;
+  let missing = 0, added = 0;
+  (o.items||[]).forEach(it=>{
+    const p = productsCache.find(x=>x.id===it.id);
+    if (p){ cart.push(p); added++; } else missing++;
+  });
+  if (!added) return showToast('Esses produtos não estão mais no cardápio.', true);
+  showView('menu'); updateCartFab(); openCheckout();
+  if (missing) showToast(missing+' item(ns) não estão mais no cardápio.', true);
+}
+
 async function loadMyOrders(){
   if (!currentUser) return;
   try{
     const snap = await withTimeout(db.collection('orders').where('userId','==',currentUser.uid).get());
     const orders = snap.docs.map(d=>({ id:d.id, ...d.data() }));
     orders.sort((a,b)=> (b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0) - (a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0));
+    myOrdersCache = orders;
     renderMyOrders(orders);
+    renderLastOrder();
   }catch(e){ console.error(e); document.getElementById('myOrdersList').innerHTML = '<p class="small">Não consegui carregar seus pedidos.</p>'; }
 }
 
@@ -537,6 +562,7 @@ function renderMyOrders(orders){
       <div class="steps">${stepsHtml}</div>
       ${eta}
       <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
+      <button class="secondary" style="margin-top:.5rem" onclick="reorder('${o.id}')">Pedir de novo</button>
     </div>`;
   }).join('');
 }
