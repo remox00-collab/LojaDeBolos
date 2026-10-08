@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{
   --bg:#fdf6f0; --card:#ffffff; --text:#3a2a20; --muted:#8a7568;
@@ -14,7 +15,7 @@
 }
 *{box-sizing:border-box;}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Georgia,'Times New Roman',serif;}
-header{padding:1.2rem 1rem;text-align:center;border-bottom:1px solid var(--border);}
+header{position:sticky;top:0;z-index:12;background:var(--bg);padding:1.2rem 1rem;text-align:center;border-bottom:1px solid var(--border);}
 header h1{margin:0;font-size:1.6rem;color:var(--accent);}
 header p{margin:.3rem 0 0;color:var(--muted);font-size:.9rem;}
 main{max-width:960px;margin:0 auto;padding:1rem;}
@@ -64,12 +65,23 @@ img{max-width:100%;}
 .profile{display:flex;gap:1rem;align-items:flex-start;}
 .profile-fields{flex:1;min-width:0;}
 .avatar{width:96px;height:96px;border-radius:50%;background:var(--border) center/cover no-repeat;display:flex;align-items:center;justify-content:center;font-size:2.2rem;color:var(--accent);flex:0 0 auto;}
+.subtabs{display:flex;gap:.5rem;overflow-x:auto;padding:.2rem 0 .8rem;margin-top:1rem;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+.subtabs::-webkit-scrollbar{display:none;}
+.subtab{flex:0 0 auto;white-space:nowrap;background:var(--card);color:var(--muted);border:1px solid var(--border);border-radius:20px;}
+.subtab.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.top-actions{position:absolute;right:.6rem;top:50%;transform:translateY(-50%);display:flex;gap:.4rem;}
+.icon-btn{position:relative;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:50%;width:2.5rem;height:2.5rem;padding:0;font-size:1.1rem;}
+.badge-dot{position:absolute;top:-.3rem;right:-.3rem;background:#a94442;color:#fff;border-radius:10px;font-size:.65rem;min-width:1.1rem;padding:.05rem .3rem;line-height:1.1rem;}
+.notif-panel{position:fixed;top:4.2rem;right:.6rem;width:min(94vw,380px);max-height:70vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.8rem;z-index:25;box-shadow:0 8px 24px rgba(0,0,0,.2);}
+.notif-item{padding:.5rem .6rem;border-bottom:1px solid var(--border);border-radius:8px;}
+.notif-item.new{background:#fff3e0;}
 @media (max-width: 480px){
+  header{padding:.8rem 5.6rem;}
+  header p{display:none;}
   input,textarea,select{font-size:16px;}
   .profile{flex-direction:column;align-items:center;}
   .profile-fields{width:100%;}
-  header{padding:.8rem .6rem;}
-  header h1{font-size:1.3rem;}
+  header h1{font-size:1.15rem;}
   main{padding:.6rem;}
   .grid{grid-template-columns:repeat(2,1fr);gap:.6rem;}
   .card img{height:100px;}
@@ -84,16 +96,24 @@ img{max-width:100%;}
 <body>
 <div id="toast" class="toast hidden"></div>
 <header>
+  <div class="top-actions">
+    <button id="bellBtn" class="icon-btn hidden" onclick="toggleNotifs()" title="Notificações">🔔<span id="bellBadge" class="badge-dot hidden">0</span></button>
+    <button id="cartBtn" class="icon-btn hidden" onclick="openCheckout()" title="Carrinho">🛒<span id="cartCount" class="badge-dot hidden">0</span></button>
+  </div>
   <h1>🍰 Doces & Cia</h1>
   <p>Bolos e salgados feitos com carinho</p>
 </header>
+<div id="notifPanel" class="notif-panel hidden">
+  <div class="row" style="justify-content:space-between;align-items:center"><strong>Notificações</strong><button class="secondary" onclick="enableAlerts()">Ativar som e avisos</button></div>
+  <div id="notifList"></div>
+</div>
 <main>
 
   <div id="authBox" class="box">
     <div id="authLoggedOut">
       <strong>Entrar</strong>
-      <input id="authEmail" type="email" placeholder="seu@email.com">
-      <input id="authPass" type="password" placeholder="senha">
+      <input id="authEmail" type="email" autocomplete="email" placeholder="seu@email.com">
+      <input id="authPass" type="password" autocomplete="current-password" placeholder="senha">
       <div class="row">
         <button onclick="doLogin()">Entrar</button>
         <button class="secondary" onclick="doSignup()">Criar conta</button>
@@ -114,6 +134,20 @@ img{max-width:100%;}
 
   <div id="viewAdmin" class="hidden">
   <div id="ownerBanner" class="notice">Modo administrador ativo.</div>
+
+  <div id="paySettingsBox" class="box">
+    <strong>Dados de recebimento (quem recebe o dinheiro)</strong>
+    <label>Nome do beneficiário</label><input id="psName" placeholder="Nome de quem recebe">
+    <label>Chave Pix (CPF/CNPJ, e-mail, celular no formato +5521999999999 ou chave aleatória)</label><input id="psPix">
+    <label>Cidade</label><input id="psCity">
+    <div class="row">
+      <div><label>Banco</label><input id="psBank"></div>
+      <div><label>Agência</label><input id="psAgency"></div>
+      <div><label>Conta</label><input id="psAccount"></div>
+    </div>
+    <p class="small">Esses dados aparecem para os clientes na tela de pagamento.</p>
+    <button onclick="savePaySettings()">Salvar dados de recebimento</button>
+  </div>
 
   <div id="adminBox" class="box">
     <strong>Adicionar produto</strong>
@@ -147,7 +181,11 @@ img{max-width:100%;}
   </div>
 
   <div id="viewAccount" class="hidden">
-    <div class="section-title">Minha conta</div>
+    <div class="subtabs">
+      <button class="subtab active" data-s="perfil" onclick="showAccountTab('perfil')">Perfil</button>
+      <button class="subtab" data-s="pedidos" onclick="showAccountTab('pedidos')">Meus pedidos</button>
+    </div>
+    <div id="acc-perfil" class="subpane">
     <div class="box profile">
       <div id="avatar" class="avatar"></div>
       <div class="profile-fields">
@@ -162,8 +200,10 @@ img{max-width:100%;}
         </div>
       </div>
     </div>
-    <div class="section-title">Meus pedidos</div>
-    <div id="myOrdersList"></div>
+    </div>
+    <div id="acc-pedidos" class="subpane hidden">
+      <div id="myOrdersList"></div>
+    </div>
   </div>
 </main>
 
@@ -173,12 +213,14 @@ img{max-width:100%;}
   <button id="tabAdmin" class="tab hidden" data-v="admin" onclick="showView('admin')">⚙️<span>Admin</span></button>
 </nav>
 
-<div id="cartFab" class="cart-fab hidden" onclick="openCheckout()">🛒 Ver carrinho (<span id="cartCount">0</span>)</div>
+
+<div id="payOverlay" class="overlay hidden"><div class="sheet" id="paySheet"></div></div>
 
 <div id="checkoutOverlay" class="overlay hidden">
   <div class="sheet">
     <h3>Finalizar pedido</h3>
     <div id="cartItems"></div>
+    <div id="checkoutForm">
     <p><strong>Total: R$ <span id="cartTotal">0,00</span></strong></p>
     <label>Seu nome</label>
     <input id="custName">
@@ -192,12 +234,13 @@ img{max-width:100%;}
     <label>Forma de pagamento</label>
     <select id="payMethod">
       <option value="pix">Pix</option>
-      <option value="credito">Cartão de crédito</option>
-      <option value="debito">Cartão de débito</option>
+      <option value="credito">Cartão de crédito (na entrega)</option>
+      <option value="debito">Cartão de débito (na entrega)</option>
     </select>
-    <p class="small">Pagamento ainda simulado — a integração com um gateway (Mercado Pago, PagSeguro, etc.) é o próximo passo.</p>
+    <p class="small">Pix: você paga na próxima tela, com QR Code. Cartão: o pagamento é feito na entrega, na maquininha. A loja confirma o pagamento e libera o preparo.</p>
+    </div>
     <div class="row">
-      <button onclick="confirmOrder()">Confirmar pedido</button>
+      <button id="btnConfirm" onclick="confirmOrder()">Confirmar pedido</button>
       <button class="secondary" onclick="closeCheckout()">Fechar</button>
     </div>
   </div>
@@ -217,11 +260,12 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
 const db = firebase.firestore();
 db.settings({ experimentalForceLongPolling: true, useFetchStreams: false });
 
 let currentUser = null, isAdmin = false, cart = [], productsCache = [];
-let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [];
+let currentPhotoDataUrl = null, currentView = 'menu', profile = {}, pendingPhoto = null, myOrdersCache = [], unsubOrders = null, ordersFirst = true, notifOrders = [], audioCtx = null, paySettings = null;
 
 const STEPS = ['aguardando_pagamento','preparo','saiu_entrega','entregue'];
 const STEP_LABELS = { aguardando_pagamento:'Pagamento', preparo:'Preparo', saiu_entrega:'A caminho', entregue:'Entregue' };
@@ -309,6 +353,9 @@ async function loginWithFacebook(){
 
 auth.onAuthStateChanged((user)=>{
   currentUser = user; isAdmin = false; profile = {}; pendingPhoto = null;
+  stopOrderWatch(); notifOrders = [];
+  document.getElementById('bellBtn').classList.add('hidden');
+  document.getElementById('notifPanel').classList.add('hidden');
   document.getElementById('authBox').classList.toggle('hidden', !!user);
   document.getElementById('tabbar').classList.toggle('hidden', !user);
   document.getElementById('loginPrompt').classList.toggle('hidden', !!user);
@@ -322,9 +369,174 @@ auth.onAuthStateChanged((user)=>{
     loadMyOrders();
   } else {
     ['menuSection','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
-    cart = []; updateCartFab();
+    currentView = 'menu'; cart = []; productsCache = []; myOrdersCache = [];
+    document.getElementById('grid').innerHTML = '';
+    document.getElementById('myOrdersList').innerHTML = '';
+    document.getElementById('lastOrderBox').classList.add('hidden');
+    showAccountTab('perfil'); updateCartFab();
   }
 });
+
+// ===== Notificações do admin =====
+function unlockAudio(){
+  try{
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }catch(e){}
+}
+document.addEventListener('pointerdown', unlockAudio);
+function playAlert(){
+  unlockAudio(); if (!audioCtx) return;
+  [0, .35, .7].forEach((t,i)=>{
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain(), now = audioCtx.currentTime + t;
+    o.type = 'sine'; o.frequency.value = i===1 ? 1175 : 880;
+    o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.6, now+.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now+.3);
+    o.start(now); o.stop(now+.32);
+  });
+  if (navigator.vibrate) navigator.vibrate([200,100,200]);
+}
+function enableAlerts(){
+  playAlert();
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  showToast('Som testado. Mantenha o site aberto para receber os avisos.');
+}
+function fmtBRL(v){ return Number(v).toFixed(2).replace('.',','); }
+function orderMs(o){ return o.createdAt && o.createdAt.toMillis ? o.createdAt.toMillis() : 0; }
+function getLastSeen(){
+  try{ let v = localStorage.getItem('dc_lastSeen'); if (!v){ v = String(Date.now()); localStorage.setItem('dc_lastSeen', v); } return Number(v); }
+  catch(e){ return Date.now(); }
+}
+function markSeen(){ try{ localStorage.setItem('dc_lastSeen', String(Date.now())); }catch(e){} updateBadge(); }
+function updateBadge(){
+  const last = getLastSeen(), n = notifOrders.filter(o=> orderMs(o) > last).length;
+  const b = document.getElementById('bellBadge');
+  b.textContent = n; b.classList.toggle('hidden', n===0);
+}
+function renderNotifs(){
+  const last = getLastSeen();
+  const list = document.getElementById('notifList');
+  list.innerHTML = notifOrders.length ? notifOrders.slice(0,15).map(o=>{
+    const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
+    const items = (o.items||[]).map(i=>escapeHtml(i.name)).join(', ');
+    return `<div class="notif-item ${orderMs(o)>last?'new':''}"><strong>Novo pedido — ${escapeHtml(o.customerName||'cliente')}</strong><div class="small">${items}</div><div class="small">R$ ${fmtBRL(o.total)} · ${when}</div></div>`;
+  }).join('') : '<p class="small">Nenhum pedido ainda.</p>';
+  updateBadge();
+}
+function toggleNotifs(){
+  const panel = document.getElementById('notifPanel');
+  const open = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden', !open);
+  if (open){ renderNotifs(); markSeen(); }
+}
+function startOrderWatch(){
+  stopOrderWatch(); ordersFirst = true;
+  unsubOrders = db.collection('orders').orderBy('createdAt','desc').onSnapshot(snap=>{
+    const orders = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+    renderOrders(orders);
+    notifOrders = orders;
+    if (!ordersFirst){
+      snap.docChanges().forEach(ch=>{
+        if (ch.type === 'added' && !ch.doc.metadata.hasPendingWrites) onNewOrder(ch.doc.data());
+      });
+    }
+    ordersFirst = false;
+    renderNotifs();
+    if (!document.getElementById('notifPanel').classList.contains('hidden')) markSeen();
+  }, err=> console.error('Erro ao acompanhar pedidos:', err));
+}
+function stopOrderWatch(){ if (unsubOrders){ unsubOrders(); unsubOrders = null; } }
+function onNewOrder(o){
+  playAlert();
+  const msg = 'Novo pedido de '+(o.customerName||'cliente')+' — R$ '+fmtBRL(o.total);
+  showToast('🔔 '+msg);
+  if ('Notification' in window && Notification.permission === 'granted'){
+    try{ new Notification('Doces & Cia', { body: msg }); }catch(e){}
+  }
+}
+
+// ===== Dados de recebimento e Pix =====
+async function loadPaySettings(){
+  try{ const sn = await withTimeout(db.collection('settings').doc('payment').get()); paySettings = sn.exists ? sn.data() : null; }
+  catch(e){ console.error(e); paySettings = null; }
+  return paySettings;
+}
+function fillPaySettingsForm(){
+  loadPaySettings().then(p=>{
+    p = p || {};
+    document.getElementById('psName').value = p.beneficiary || '';
+    document.getElementById('psPix').value = p.pixKey || '';
+    document.getElementById('psCity').value = p.city || '';
+    document.getElementById('psBank').value = p.bank || '';
+    document.getElementById('psAgency').value = p.agency || '';
+    document.getElementById('psAccount').value = p.account || '';
+  });
+}
+async function savePaySettings(){
+  const v = id=> document.getElementById(id).value.trim();
+  let pixKey = v('psPix');
+  if (/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(pixKey) || /^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/.test(pixKey)) pixKey = pixKey.replace(/\D/g,'');
+  const data = { beneficiary:v('psName'), pixKey, city:v('psCity'), bank:v('psBank'), agency:v('psAgency'), account:v('psAccount') };
+  if (!data.beneficiary || !data.pixKey || !data.city) return showToast('Preencha nome, chave Pix e cidade.', true);
+  try{ await withTimeout(db.collection('settings').doc('payment').set(data)); paySettings = data; document.getElementById('psPix').value = pixKey; showToast('Dados de recebimento salvos!'); }
+  catch(e){ showToast('Erro ao salvar: '+e.message, true); }
+}
+function emv(id, val){ return id + String(val.length).padStart(2,'0') + val; }
+function crc16(str){
+  let crc = 0xFFFF;
+  for (let i=0;i<str.length;i++){
+    crc ^= str.charCodeAt(i) << 8;
+    for (let j=0;j<8;j++){ crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1); crc &= 0xFFFF; }
+  }
+  return crc.toString(16).toUpperCase().padStart(4,'0');
+}
+function cleanTxt(s, max){ return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^A-Za-z0-9 ]/g,'').toUpperCase().slice(0,max).trim(); }
+function buildPix(key, name, city, amount, txid){
+  const mai = emv('00','br.gov.bcb.pix') + emv('01', key);
+  const tx = String(txid).replace(/[^A-Za-z0-9]/g,'').slice(0,25) || '***';
+  const base = emv('00','01') + emv('01','11') + emv('26', mai) + emv('52','0000') + emv('53','986') +
+    emv('54', Number(amount).toFixed(2)) + emv('58','BR') + emv('59', cleanTxt(name,25)) + emv('60', cleanTxt(city,15)) +
+    emv('62', emv('05', tx)) + '6304';
+  return base + crc16(base);
+}
+function closePay(){ document.getElementById('payOverlay').classList.add('hidden'); }
+function copyPix(){
+  const ta = document.getElementById('pixCode');
+  const done = ()=> showToast('Código Pix copiado!');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(done, ()=>{ ta.select(); document.execCommand('copy'); done(); });
+  else { ta.select(); document.execCommand('copy'); done(); }
+}
+async function showPayment(orderId, total, method){
+  const sheet = document.getElementById('paySheet');
+  document.getElementById('payOverlay').classList.remove('hidden');
+  const closeBtn = '<div class="row" style="margin-top:.8rem"><button class="secondary" onclick="closePay()">Fechar</button></div>';
+  if (method !== 'pix'){
+    const lbl = method === 'credito' ? 'cartão de crédito' : 'cartão de débito';
+    sheet.innerHTML = `<h3>Pedido registrado ✅</h3><p>Você escolheu ${lbl}: o pagamento é feito na entrega, na maquininha.</p><p><strong>Total: R$ ${fmtBRL(total)}</strong></p>${closeBtn}`;
+    return;
+  }
+  sheet.innerHTML = '<p class="small">Gerando pagamento...</p>';
+  const p = await loadPaySettings();
+  if (!p || !p.pixKey){
+    sheet.innerHTML = `<h3>Pedido registrado ✅</h3><p>A loja ainda não cadastrou a chave Pix. Entre em contato com a loja para combinar o pagamento.</p>${closeBtn}`;
+    return;
+  }
+  const code = buildPix(p.pixKey, p.beneficiary || 'LOJA', p.city || 'BRASIL', total, orderId);
+  const bank = (p.bank || p.agency || p.account) ? `<p class="small">Ou transfira para: ${escapeHtml(p.bank||'')} ${p.agency?'· Ag. '+escapeHtml(p.agency):''} ${p.account?'· Conta '+escapeHtml(p.account):''}</p>` : '';
+  sheet.innerHTML = `<h3>Pague com Pix</h3>
+    <p class="small">Escaneie o QR Code no app do seu banco ou use o Pix copia e cola.</p>
+    <p><strong>Valor: R$ ${fmtBRL(total)}</strong></p>
+    <div id="qrBox" style="display:flex;justify-content:center;margin:.8rem 0"></div>
+    <label>Pix copia e cola</label>
+    <textarea id="pixCode" rows="3" readonly>${escapeHtml(code)}</textarea>
+    <button onclick="copyPix()">Copiar código</button>
+    <p class="small">Beneficiário: <strong>${escapeHtml(p.beneficiary||'')}</strong></p>${bank}
+    <p class="small">Assim que a loja confirmar o recebimento, seu pedido entra em preparo.</p>${closeBtn}`;
+  if (typeof QRCode !== 'undefined') new QRCode(document.getElementById('qrBox'), { text: code, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  else document.getElementById('qrBox').innerHTML = '<p class="small">Não foi possível gerar o QR Code. Use o código abaixo.</p>';
+}
 
 function showView(v){
   currentView = v;
@@ -336,6 +548,10 @@ function showView(v){
   window.scrollTo(0,0);
 }
 
+function showAccountTab(name){
+  document.querySelectorAll('.subpane').forEach(el=> el.classList.toggle('hidden', el.id !== 'acc-'+name));
+  document.querySelectorAll('.subtab').forEach(b=> b.classList.toggle('active', b.dataset.s === name));
+}
 function renderProfile(){
   const av = document.getElementById('avatar');
   const photo = pendingPhoto || profile.photoURL;
@@ -379,8 +595,9 @@ async function checkAdmin(uid, email){
     }
   }catch(e){ console.error('Erro ao checar perfil:', e); showToast('Não consegui checar seu perfil (tempo esgotado).', true); }
   document.getElementById('tabAdmin').classList.toggle('hidden', !isAdmin);
+  document.getElementById('bellBtn').classList.toggle('hidden', !isAdmin);
   if (productsCache.length) renderGrid(productsCache);
-  if (isAdmin) loadOrders();
+  if (isAdmin){ startOrderWatch(); fillPaySettingsForm(); }
 }
 
 async function doLogin(){
@@ -399,7 +616,7 @@ async function doSignup(){
     showToast('Conta criada!');
   } catch(e){ showToast(mapAuthError(e), true); }
 }
-async function doLogout(){ await auth.signOut(); cart=[]; updateCartFab(); showView('menu'); }
+async function doLogout(){ await auth.signOut(); cart=[]; updateCartFab(); }
 
 async function loadProducts(){
   try{
@@ -472,15 +689,18 @@ function addToCart(id){
 }
 function removeFromCart(i){ cart.splice(i,1); updateCartFab(); renderCartItems(); }
 function updateCartFab(){
-  document.getElementById('cartCount').textContent = cart.length;
-  document.getElementById('cartFab').classList.toggle('hidden', cart.length===0 || currentView!=='menu');
+  const c = document.getElementById('cartCount');
+  c.textContent = cart.length; c.classList.toggle('hidden', cart.length===0);
+  document.getElementById('cartBtn').classList.toggle('hidden', !currentUser);
 }
 function renderCartItems(){
   const list = document.getElementById('cartItems'); let total=0;
   list.innerHTML = cart.length ? cart.map((c,i)=>{
     total += Number(c.price);
     return `<div class="cart-line"><span>${escapeHtml(c.name)} — R$ ${Number(c.price).toFixed(2).replace('.',',')}</span><button class="secondary" onclick="removeFromCart(${i})">Remover</button></div>`;
-  }).join('') : '<p class="small">Carrinho vazio.</p>';
+  }).join('') : '<p>Até o momento nenhuma compra foi realizada. Seu carrinho está vazio.</p>';
+  document.getElementById('checkoutForm').classList.toggle('hidden', !cart.length);
+  document.getElementById('btnConfirm').classList.toggle('hidden', !cart.length);
   document.getElementById('cartTotal').textContent = total.toFixed(2).replace('.',',');
 }
 function openCheckout(){ renderCartItems(); const n=document.getElementById('custName'); if(!n.value) n.value = profile.displayName || ''; document.getElementById('checkoutOverlay').classList.remove('hidden'); }
@@ -498,13 +718,14 @@ async function confirmOrder(){
   if (!cart.length) return showToast('Carrinho vazio.', true);
   const total = cart.reduce((s,c)=>s+Number(c.price),0);
   try{
-    await db.collection('orders').add({
+    const ref = await db.collection('orders').add({
       userId: currentUser.uid, customerName, rua, numero, bairro, cidade,
       paymentMethod, items: cart, total, status: 'aguardando_pagamento',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     showToast('Pedido registrado! Assim que confirmarmos o pagamento, ele entra em preparo.'); cart=[]; updateCartFab(); closeCheckout();
     loadMyOrders();
+    showPayment(ref.id, total, paymentMethod);
   }catch(e){ showToast('Erro ao registrar pedido: '+e.message, true); }
 }
 
@@ -562,6 +783,7 @@ function renderMyOrders(orders){
       <div class="steps">${stepsHtml}</div>
       ${eta}
       <div class="small">Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</div>
+      ${status==='aguardando_pagamento' && o.paymentMethod==='pix' ? `<button style="margin-top:.5rem;margin-right:.4rem" onclick="showPayment('${o.id}',${Number(o.total)},'pix')">Pagar com Pix</button>` : ''}
       <button class="secondary" style="margin-top:.5rem" onclick="reorder('${o.id}')">Pedir de novo</button>
     </div>`;
   }).join('');
@@ -579,7 +801,7 @@ function renderOrders(orders){
   list.innerHTML = orders.map(o=>{
     const addrLine = [o.rua,o.numero].filter(Boolean).join(', ') + (o.bairro?' — '+o.bairro:'') + (o.cidade?', '+o.cidade:'');
     const items = (o.items||[]).map(it=>`<li>${escapeHtml(it.name)} — R$ ${Number(it.price).toFixed(2).replace('.',',')}</li>`).join('');
-    const payLabel = {pix:'Pix',credito:'Cartão de crédito',debito:'Cartão de débito'}[o.paymentMethod]||o.paymentMethod;
+    const payLabel = {pix:'Pix',credito:'Cartão de crédito (na entrega)',debito:'Cartão de débito (na entrega)'}[o.paymentMethod]||o.paymentMethod;
     const when = o.createdAt && o.createdAt.toDate ? o.createdAt.toDate().toLocaleString('pt-BR') : '';
     const status = o.status || 'aguardando_pagamento';
     const flow = STATUS_FLOW[status];
@@ -605,7 +827,7 @@ async function advanceOrderStatus(id, status){
   if (!flow || !flow.next) return;
   const update = { status: flow.next };
   if (flow.next === 'saiu_entrega') update.deliveryStartedAt = firebase.firestore.FieldValue.serverTimestamp();
-  try{ await db.collection('orders').doc(id).update(update); loadOrders(); }
+  try{ await db.collection('orders').doc(id).update(update); }
   catch(e){ showToast('Erro ao atualizar pedido.', true); }
 }
 </script>
