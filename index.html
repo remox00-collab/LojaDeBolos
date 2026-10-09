@@ -154,6 +154,11 @@ img{max-width:100%;}
     <div id="grid" class="grid"></div>
   </div>
 
+  <div id="viewGF" class="hidden">
+    <div class="section-title">Cardápio sem glúten</div>
+    <div id="gridGF" class="grid"></div>
+  </div>
+
   <div id="viewAdmin" class="hidden">
   <div id="ownerBanner" class="notice">Modo administrador ativo.</div>
 
@@ -177,6 +182,11 @@ img{max-width:100%;}
       <div><label>Nome</label><input id="pName" placeholder="Ex: Bolo de chocolate"></div>
       <div><label>Preço (R$)</label><input id="pPrice" type="number" step="0.01" placeholder="45.00"></div>
     </div>
+    <label>Categoria do alimento</label>
+    <select id="pGluten">
+      <option value="com" selected>Com glúten (aparece no cardápio normal)</option>
+      <option value="sem">Sem glúten (aparece só na aba Sem glúten)</option>
+    </select>
     <label>Descrição</label>
     <textarea id="pDesc" rows="2"></textarea>
     <label>Foto (escolher do computador/celular)</label>
@@ -235,6 +245,7 @@ img{max-width:100%;}
 
 <nav id="tabbar" class="tabbar hidden">
   <button class="tab active" data-v="menu" onclick="showView('menu')">🍰<span>Cardápio</span></button>
+  <button class="tab" data-v="gf" onclick="showView('gf')">🌾<span>Sem glúten</span></button>
   <button class="tab" data-v="account" onclick="showView('account')">👤<span>Conta</span></button>
   <button id="tabAdmin" class="tab hidden" data-v="admin" onclick="showView('admin')">⚙️<span>Admin</span></button>
 </nav>
@@ -402,9 +413,10 @@ auth.onAuthStateChanged((user)=>{
     loadProducts();
     loadMyOrders();
   } else {
-    ['menuSection','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
+    ['menuSection','viewGF','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
     currentView = 'menu'; cart = []; productsCache = []; myOrdersCache = [];
     document.getElementById('grid').innerHTML = '';
+    document.getElementById('gridGF').innerHTML = '';
     document.getElementById('myOrdersList').innerHTML = '';
     document.getElementById('pendingList').innerHTML = '';
     document.getElementById('pendCount').classList.add('hidden');
@@ -582,6 +594,7 @@ async function showPayment(orderId, total, method){
 function showView(v){
   currentView = v;
   document.getElementById('menuSection').classList.toggle('hidden', v!=='menu');
+  document.getElementById('viewGF').classList.toggle('hidden', v!=='gf');
   document.getElementById('viewAccount').classList.toggle('hidden', v!=='account');
   document.getElementById('viewAdmin').classList.toggle('hidden', v!=='admin');
   document.querySelectorAll('.tab').forEach(b=> b.classList.toggle('active', b.dataset.v===v));
@@ -722,22 +735,34 @@ async function loadProducts(){
   }catch(e){ console.error(e); document.getElementById('grid').innerHTML = '<p class="small">Não consegui carregar o cardápio (tempo esgotado). Recarregue a página.</p>'; }
 }
 
-function renderGrid(products){
-  const grid = document.getElementById('grid');
-  if (!products.length){ grid.innerHTML = '<p class="small">Nenhum produto cadastrado ainda.</p>'; return; }
-  grid.innerHTML = products.map(p=>{
-    const img = p.photoUrl ? `<img src="${p.photoUrl}">` : `<img alt="sem foto">`;
-    return `<div class="card">
+function productCard(p){
+  const img = p.photoUrl ? `<img src="${p.photoUrl}">` : `<img alt="sem foto">`;
+  const adminBtns = isAdmin ? `
+        <button class="secondary" onclick="moveProduct('${p.id}', ${!p.glutenFree})">${p.glutenFree ? 'Mover para o cardápio normal' : 'Mover para sem glúten'}</button>
+        <button class="danger" onclick="deleteProduct('${p.id}', this)">Excluir</button>` : '';
+  return `<div class="card">
       ${img}
       <div class="body">
         <h3>${escapeHtml(p.name)}</h3>
         <div class="desc">${escapeHtml(p.description||'')}</div>
         <div class="price">R$ ${Number(p.price).toFixed(2).replace('.',',')}</div>
-        <button onclick="addToCart('${p.id}')">Adicionar</button>
-        ${isAdmin ? `<button class="danger" onclick="deleteProduct('${p.id}', this)">Excluir</button>` : ''}
+        <button onclick="addToCart('${p.id}')">Adicionar</button>${adminBtns}
       </div>
     </div>`;
-  }).join('');
+}
+function renderGrid(products){
+  const fill = (id, list, empty)=>{
+    document.getElementById(id).innerHTML = list.length ? list.map(productCard).join('') : `<p class="small">${empty}</p>`;
+  };
+  fill('grid', products.filter(p=> !p.glutenFree), 'Nenhum produto cadastrado ainda.');
+  fill('gridGF', products.filter(p=> p.glutenFree), 'Nenhum produto sem glúten cadastrado ainda.');
+}
+async function moveProduct(id, toGF){
+  try{
+    await withTimeout(db.collection('products').doc(id).update({ glutenFree: toGF }));
+    showToast(toGF ? 'Movido para o cardápio sem glúten.' : 'Movido para o cardápio normal.');
+    loadProducts();
+  }catch(e){ showToast('Erro ao mover produto: '+e.message, true); }
 }
 
 async function saveProduct(){
@@ -753,6 +778,7 @@ async function saveProduct(){
   try{
     await db.collection('products').add({
       name, price, description, photoUrl,
+      glutenFree: document.getElementById('pGluten').value === 'sem',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     clearForm(); showToast('Produto salvo!'); loadProducts();
@@ -762,6 +788,7 @@ function clearForm(){
   document.getElementById('pName').value='';
   document.getElementById('pPrice').value='';
   document.getElementById('pDesc').value='';
+  document.getElementById('pGluten').value='com';
   document.getElementById('pPhotoUrl').value='';
   document.getElementById('pPhotoFile').value='';
   document.getElementById('pPhotoPreview').classList.add('hidden');
