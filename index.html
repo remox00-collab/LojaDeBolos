@@ -677,7 +677,7 @@ function adminOrderExtras(o, status){
 
 // ===== Avisos em segundo plano (push) =====
 // Cole aqui a "Chave pública" do Firebase: Configurações do projeto > Cloud Messaging > Certificados push da Web
-const VAPID_KEY = '';BN15KqFXs5_58qVPXi2X49s968vcTZG-VJk7yWrJdNZ7_iLBdEF7VKkj6U5TWvQy8SX8r3nZP8qtLEPpwu7XlMo
+const VAPID_KEY = 'BN15KqFXs5_58qVPXi2X49s968vcTZG-VJk7yWrJdNZ7_iLBdEF7VKkj6U5TWvQy8SX8r3nZP8qtLEPpwu7XlMo';
 async function registerPush(silent){
   if (!VAPID_KEY){ if (!silent) showToast('Falta colar a chave VAPID no código (veja as instruções).', true); return; }
   if (!('serviceWorker' in navigator) || !firebase.messaging.isSupported()){ if (!silent) showToast('Este navegador não suporta avisos em segundo plano.', true); return; }
