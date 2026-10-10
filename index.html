@@ -7,6 +7,10 @@
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.7.1/firebase-messaging-compat.js"></script>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#c9704a">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{
@@ -78,6 +82,8 @@ img{max-width:100%;}
 .pw-wrap{position:relative;margin-bottom:.5rem;}
 .pw-wrap input{margin-bottom:0;padding-right:2.8rem;}
 .eye{position:absolute;right:.2rem;top:50%;transform:translateY(-50%);background:transparent;color:var(--muted);padding:.3rem .5rem;font-size:1.1rem;}
+.btn-link{display:inline-block;text-align:center;padding:.5rem .8rem;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;}
+.btn-link.secondary{background:transparent;border:1px solid var(--accent);color:var(--accent);}
 .user-btn{position:absolute;left:.6rem;top:50%;transform:translateY(-50%);background-size:cover;background-position:center;font-weight:bold;color:var(--accent);}
 .user-menu{right:auto;left:.6rem;width:min(80vw,260px);}
 .notif-item{padding:.5rem .6rem;border-bottom:1px solid var(--border);border-radius:8px;}
@@ -149,12 +155,14 @@ img{max-width:100%;}
 
   <div id="loginPrompt" class="notice hidden">Faça login ou crie uma conta acima para ver o cardápio.</div>
   <div id="menuSection">
+    <div class="hours-note notice"></div>
     <div id="lastOrderBox" class="box hidden"></div>
     <div class="section-title">Nosso cardápio</div>
     <div id="grid" class="grid"></div>
   </div>
 
   <div id="viewGF" class="hidden">
+    <div class="hours-note notice"></div>
     <div class="section-title">Cardápio sem glúten</div>
     <div id="gridGF" class="grid"></div>
   </div>
@@ -212,6 +220,19 @@ img{max-width:100%;}
   </div>
   </div>
 
+  <div id="viewSupport" class="hidden">
+    <div class="section-title">Suporte</div>
+    <div class="box">
+      <p>Precisa de ajuda com seu pedido? Fale com a gente:</p>
+      <p><strong>📞 (15) 99803-5662</strong></p>
+      <div class="row">
+        <a class="btn-link" href="https://wa.me/5515998035662" target="_blank" rel="noopener">WhatsApp</a>
+        <a class="btn-link secondary" href="tel:+5515998035662">Ligar</a>
+      </div>
+      <p class="small" style="margin-top:.6rem">Atendimento das 8h às 18h.</p>
+    </div>
+  </div>
+
   <div id="viewAccount" class="hidden">
     <div class="subtabs">
       <button class="subtab active" data-s="perfil" onclick="showAccountTab('perfil')">Perfil</button>
@@ -246,6 +267,7 @@ img{max-width:100%;}
 <nav id="tabbar" class="tabbar hidden">
   <button class="tab active" data-v="menu" onclick="showView('menu')">🍰<span>Cardápio</span></button>
   <button class="tab" data-v="gf" onclick="showView('gf')">🌾<span>Sem glúten</span></button>
+  <button class="tab" data-v="support" onclick="showView('support')">💬<span>Suporte</span></button>
   <button class="tab" data-v="account" onclick="showView('account')">👤<span>Conta</span></button>
   <button id="tabAdmin" class="tab hidden" data-v="admin" onclick="showView('admin')">⚙️<span>Admin</span></button>
 </nav>
@@ -258,6 +280,7 @@ img{max-width:100%;}
     <h3>Finalizar pedido</h3>
     <div id="cartItems"></div>
     <div id="checkoutForm">
+    <div class="hours-note notice"></div>
     <p><strong>Total: R$ <span id="cartTotal">0,00</span></strong></p>
     <label>Seu nome</label>
     <input id="custName">
@@ -268,6 +291,8 @@ img{max-width:100%;}
     </div>
     <input id="custBairro" placeholder="Bairro">
     <input id="custCidade" placeholder="Cidade">
+    <label>Telefone para contato (só a loja vê)</label>
+    <input id="custPhone" type="tel" inputmode="tel" autocomplete="tel" placeholder="(15) 99999-9999">
     <label>Forma de pagamento</label>
     <select id="payMethod">
       <option value="pix">Pix</option>
@@ -398,7 +423,7 @@ auth.onAuthStateChanged((user)=>{
   document.getElementById('bellBtn').classList.add('hidden');
   document.getElementById('notifPanel').classList.add('hidden');
   document.getElementById('authHelp').classList.add('hidden');
-  pwPinned = false; pwHover = false; applyPw();
+  pwPinned = false; pwHover = false; applyPw(); updateHours();
   document.getElementById('userMenu').classList.add('hidden');
   document.getElementById('userBtn').classList.toggle('hidden', !user);
   document.getElementById('authBox').classList.toggle('hidden', !!user);
@@ -413,7 +438,7 @@ auth.onAuthStateChanged((user)=>{
     loadProducts();
     loadMyOrders();
   } else {
-    ['menuSection','viewGF','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
+    ['menuSection','viewGF','viewSupport','viewAccount','viewAdmin'].forEach(id=> document.getElementById(id).classList.add('hidden'));
     currentView = 'menu'; cart = []; productsCache = []; myOrdersCache = [];
     document.getElementById('grid').innerHTML = '';
     document.getElementById('gridGF').innerHTML = '';
@@ -446,10 +471,12 @@ function playAlert(){
   });
   if (navigator.vibrate) navigator.vibrate([200,100,200]);
 }
-function enableAlerts(){
+async function enableAlerts(){
   playAlert();
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  showToast('Som testado. Mantenha o site aberto para receber os avisos.');
+  if (!('Notification' in window)) return showToast('Este navegador não suporta notificações.', true);
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return showToast('Permissão negada. Libere as notificações nas configurações do navegador.', true);
+  await registerPush(false);
 }
 function fmtBRL(v){ return Number(v).toFixed(2).replace('.',','); }
 function orderMs(o){ return o.createdAt && o.createdAt.toMillis ? o.createdAt.toMillis() : 0; }
@@ -591,10 +618,89 @@ async function showPayment(orderId, total, method){
   else document.getElementById('qrBox').innerHTML = '<p class="small">Não foi possível gerar o QR Code. Use o código abaixo.</p>';
 }
 
+// ===== Horário de funcionamento (8h às 18h, Brasília) =====
+const OPEN_H = 8, CLOSE_H = 18;
+function brHour(){ return Number(new Date().toLocaleString('en-US', { timeZone:'America/Sao_Paulo', hour:'numeric', hour12:false })) % 24; }
+function isOpenNow(){ const h = brHour(); return h >= OPEN_H && h < CLOSE_H; }
+function updateHours(){
+  const open = isOpenNow();
+  document.querySelectorAll('.hours-note').forEach(el=>{
+    el.innerHTML = open ? '🕗 Funcionamos das 8h às 18h. Estamos abertos!'
+      : '🕗 Funcionamos das 8h às 18h. <strong>Estamos fechados agora</strong> — você pode ver o cardápio, mas os pedidos só podem ser feitos nesse horário.';
+  });
+}
+setInterval(updateHours, 60000);
+
+// ===== Telefone =====
+function cleanPhone(v){
+  let d = String(v||'').replace(/\D/g,'');
+  if (d.length >= 12 && d.startsWith('55')) d = d.slice(2);
+  return d;
+}
+function formatPhone(v){
+  const d = cleanPhone(v);
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return d;
+}
+
+// ===== Conferência do valor (painel Admin) =====
+function expectedTotal(o){
+  let sum = 0;
+  for (const it of (o.items||[])){
+    const p = productsCache.find(x=> x.id === it.id);
+    if (!p) return null;
+    sum += Number(p.price);
+  }
+  return Math.round(sum*100)/100;
+}
+function adminOrderExtras(o, status){
+  let html = '';
+  if (o.customerPhone){
+    const d = cleanPhone(o.customerPhone);
+    html += `<div class="small">📞 ${escapeHtml(formatPhone(d))} · <a href="tel:+55${d}">Ligar</a> · <a href="https://wa.me/55${d}" target="_blank" rel="noopener">WhatsApp</a></div>`;
+  }
+  if (status === 'aguardando_pagamento' || status === 'cancelado'){
+    const exp = expectedTotal(o), total = Number(o.total);
+    const itemsSum = (o.items||[]).reduce((s,it)=> s + Number(it.price), 0);
+    if (exp === null){
+      html += `<div class="notice" style="background:#f8d7da;color:#7a1f1f;border-color:#e0a4a4">⚠️ Algum item deste pedido não existe mais no cardápio. Confira antes de confirmar.</div>`;
+    } else {
+      const bad = Math.abs(exp - total) > 0.009 || Math.abs(itemsSum - total) > 0.009;
+      html += bad
+        ? `<div class="notice" style="background:#f8d7da;color:#7a1f1f;border-color:#e0a4a4">⚠️ <strong>Valor divergente!</strong> O pedido diz R$ ${fmtBRL(total)}, mas pelos preços do cardápio o valor correto é <strong>R$ ${fmtBRL(exp)}</strong>. Só confirme se esse valor exato entrou no banco.</div>`
+        : `<div class="small">Valor esperado pelo cardápio: <strong>R$ ${fmtBRL(exp)}</strong></div>`;
+    }
+  }
+  return html;
+}
+
+// ===== Avisos em segundo plano (push) =====
+// Cole aqui a "Chave pública" do Firebase: Configurações do projeto > Cloud Messaging > Certificados push da Web
+const VAPID_KEY = '';
+async function registerPush(silent){
+  if (!VAPID_KEY){ if (!silent) showToast('Falta colar a chave VAPID no código (veja as instruções).', true); return; }
+  if (!('serviceWorker' in navigator) || !firebase.messaging.isSupported()){ if (!silent) showToast('Este navegador não suporta avisos em segundo plano.', true); return; }
+  try{
+    const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+    const token = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+    if (!token) throw new Error('não foi possível obter o token');
+    await db.collection('adminTokens').doc(token).set({ uid: currentUser.uid, ua: navigator.userAgent.slice(0,120), updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    if (!silent) showToast('Avisos em segundo plano ativados neste aparelho!');
+  }catch(e){ console.error(e); if (!silent) showToast('Não consegui ativar os avisos: '+e.message, true); }
+}
+async function notifyAdminPush(orderId){
+  try{
+    const t = await currentUser.getIdToken();
+    fetch('/api/notify', { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+t }, body: JSON.stringify({ orderId }) });
+  }catch(e){ console.error(e); }
+}
+
 function showView(v){
   currentView = v;
   document.getElementById('menuSection').classList.toggle('hidden', v!=='menu');
   document.getElementById('viewGF').classList.toggle('hidden', v!=='gf');
+  document.getElementById('viewSupport').classList.toggle('hidden', v!=='support');
   document.getElementById('viewAccount').classList.toggle('hidden', v!=='account');
   document.getElementById('viewAdmin').classList.toggle('hidden', v!=='admin');
   document.querySelectorAll('.tab').forEach(b=> b.classList.toggle('active', b.dataset.v===v));
@@ -680,13 +786,17 @@ async function checkAdmin(uid, email){
       const d = snap.data(); isAdmin = !!d.isAdmin;
       if (d.displayName) profile.displayName = d.displayName;
       if (d.photoData) profile.photoURL = d.photoData;
+      if (d.phone) profile.phone = d.phone;
       renderProfile();
     }
   }catch(e){ console.error('Erro ao checar perfil:', e); showToast('Não consegui checar seu perfil (tempo esgotado).', true); }
   document.getElementById('tabAdmin').classList.toggle('hidden', !isAdmin);
   document.getElementById('bellBtn').classList.toggle('hidden', !isAdmin);
   if (productsCache.length) renderGrid(productsCache);
-  if (isAdmin){ startOrderWatch(); fillPaySettingsForm(); }
+  if (isAdmin){
+    startOrderWatch(); fillPaySettingsForm();
+    if ('Notification' in window && Notification.permission === 'granted') registerPush(true);
+  }
 }
 
 async function doLogin(){
@@ -825,7 +935,7 @@ function renderCartItems(){
   document.getElementById('btnConfirm').classList.toggle('hidden', !cart.length);
   document.getElementById('cartTotal').textContent = total.toFixed(2).replace('.',',');
 }
-function openCheckout(){ renderCartItems(); const n=document.getElementById('custName'); if(!n.value) n.value = profile.displayName || ''; document.getElementById('checkoutOverlay').classList.remove('hidden'); }
+function openCheckout(){ renderCartItems(); const n=document.getElementById('custName'); if(!n.value) n.value = profile.displayName || ''; const ph=document.getElementById('custPhone'); if(!ph.value) ph.value = profile.phone ? formatPhone(profile.phone) : ''; updateHours(); document.getElementById('checkoutOverlay').classList.remove('hidden'); }
 function closeCheckout(){ document.getElementById('checkoutOverlay').classList.add('hidden'); }
 
 async function confirmOrder(){
@@ -835,18 +945,23 @@ async function confirmOrder(){
   const numero = document.getElementById('custNum').value.trim();
   const bairro = document.getElementById('custBairro').value.trim();
   const cidade = document.getElementById('custCidade').value.trim();
+  const phone = cleanPhone(document.getElementById('custPhone').value);
   const paymentMethod = document.getElementById('payMethod').value;
+  if (!isOpenNow()) return showToast('Estamos fechados agora. Pedidos das 8h às 18h.', true);
   if (!customerName||!rua||!numero||!bairro||!cidade) return showToast('Preencha nome e endereço completo.', true);
+  if (phone.length < 10 || phone.length > 11) return showToast('Digite um telefone válido com DDD.', true);
   if (!cart.length) return showToast('Carrinho vazio.', true);
   const total = cart.reduce((s,c)=>s+Number(c.price),0);
   try{
     const ref = await db.collection('orders').add({
-      userId: currentUser.uid, customerName, rua, numero, bairro, cidade,
-      paymentMethod, items: cart, total, status: 'aguardando_pagamento',
+      userId: currentUser.uid, customerName, customerPhone: phone, rua, numero, bairro, cidade,
+      paymentMethod, items: cart.map(c=>({ id:c.id, name:c.name, price:Number(c.price) })), total, status: 'aguardando_pagamento',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     showToast('Pedido registrado! Assim que confirmarmos o pagamento, ele entra em preparo.'); cart=[]; updateCartFab(); closeCheckout();
     loadMyOrders();
+    notifyAdminPush(ref.id);
+    db.collection('users').doc(currentUser.uid).set({ phone }, { merge: true }).then(()=>{ profile.phone = phone; }).catch(()=>{});
     showPayment(ref.id, total, paymentMethod);
   }catch(e){ showToast('Erro ao registrar pedido: '+e.message, true); }
 }
@@ -997,6 +1112,7 @@ function renderOrders(orders){
       <div class="small">${when}</div>
       <div class="small">${escapeHtml(addrLine)}</div>
       <div class="small">Pagamento: ${escapeHtml(payLabel||'')}</div>
+      ${adminOrderExtras(o, status)}
       <ul>${items}</ul>
       <strong>Total: R$ ${Number(o.total).toFixed(2).replace('.',',')}</strong>
       <div class="row" style="margin-top:.5rem">
@@ -1008,6 +1124,12 @@ function renderOrders(orders){
 async function advanceOrderStatus(id, status){
   const flow = STATUS_FLOW[status];
   if (!flow || !flow.next) return;
+  if (flow.next === 'preparo'){
+    const o = notifOrders.find(x=> x.id === id) || {};
+    const exp = expectedTotal(o);
+    const msg = 'Você conferiu no banco que entrou o valor correto' + (exp !== null ? ' (R$ ' + fmtBRL(exp) + ')' : '') + '? Confirmar o pagamento deste pedido?';
+    if (!confirm(msg)) return;
+  }
   const update = { status: flow.next };
   if (flow.next === 'saiu_entrega') update.deliveryStartedAt = firebase.firestore.FieldValue.serverTimestamp();
   try{ await db.collection('orders').doc(id).update(update); }
