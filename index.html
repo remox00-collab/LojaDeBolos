@@ -412,7 +412,7 @@ async function loginWithGoogle(){
   catch(e){ showToast(mapAuthError(e), true); }
 }
 async function loginWithFacebook(){
-  try{ await auth.signInWithPopup(new firebase.auth.FacebookAuthProvider()); showToast('Login feito!'); }
+  try{ const fb = new firebase.auth.FacebookAuthProvider(); fb.addScope('email'); await auth.signInWithPopup(fb); showToast('Login feito!'); }
   catch(e){ showToast(mapAuthError(e), true); }
 }
 
